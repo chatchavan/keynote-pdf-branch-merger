@@ -53,7 +53,7 @@ def make_master(path: Path, deck_id):
                               "uri": "https://example.org"})
         if deck_id:
             page.insert_text((4, H - 4), f"KPB1|{deck_id}|{n}|{len(SLIDES)}",
-                             fontsize=1, fontname="helv", render_mode=3)
+                             fontsize=1, fontname="cour", render_mode=3)
     doc.save(path)
     doc.close()
 
