@@ -77,6 +77,8 @@ Only real annotation objects count (`page.getAnnotations()`), not counting `Link
 - The header links (in `src/index.html`): **Download offline version to use on your computer**, then Source code and Report a problem (the repo's issues page). The download link has `download="PDF-slides-merger.html"`, and `wireOfflineLink()` points its `href` at the page's own URL; `download` works because the page is same-origin. When the page itself was opened from `file://` (already an offline copy) the link is hidden.
 
 ## Common Commands
+Double-clickable: **`Ω build PDF slides merger.command`** installs dev dependencies if `node_modules` is missing, runs `npm test` and `npm run build`, and reveals `docs/index.html` in Finder. It prepends `/opt/homebrew/bin` to `PATH`, because Finder-launched shells may not have it. It does not commit or push: publishing stays deliberate.
+
 ```bash
 npm install          # dev deps only (pdfjs-dist, pdf-lib), used to refresh vendor/ and run tests
 npm test

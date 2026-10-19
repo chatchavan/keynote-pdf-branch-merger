@@ -32,6 +32,8 @@ Only annotations your PDF app saves as annotations (most apps' default: Preview,
 
 The PDFs need to come from keynote-pdf-brancher, the lecturer's tool that exports a Keynote deck into the (ahead)/(complete) PDFs. Its newer versions stamp each page with an invisible slide ID, which this page uses to pair pages exactly. Older PDFs are paired by content instead.
 
+Double-click **`Ω build PDF slides merger.command`** to run the tests and build `docs/index.html`, or from a terminal:
+
 ```bash
 npm install
 npm test
