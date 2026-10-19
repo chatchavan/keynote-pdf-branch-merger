@@ -6,7 +6,8 @@
     "test": "node --test tests/*.test.js",
     "fixtures": "uv run --with pymupdf scripts/make_fixtures.py",
     "build": "node scripts/make_icons.mjs && node scripts/pack.mjs",
-    "icons": "node scripts/make_icons.mjs"
+    "icons": "node scripts/make_icons.mjs",
+    "demo": "node scripts/record_demo.mjs"
   },
   "keywords": [],
   "author": "",
@@ -15,7 +16,8 @@
   "devDependencies": {
     "lucide-static": "^1.51.0",
     "pdf-lib": "^1.17.1",
-    "pdfjs-dist": "^3.11.174"
+    "pdfjs-dist": "^3.11.174",
+    "puppeteer-core": "^25.12.0"
   },
   "repository": {
     "type": "git",

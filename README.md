@@ -4,6 +4,8 @@ Bring the notes you wrote on the **(ahead)** slides into the **(complete)** slid
 
 Before class you get `Lecture (ahead).pdf`. After class you get `Lecture (complete).pdf`, which has extra slides (for example, answers to exercises). If you annotated the ahead version, this page builds a copy of the complete version with your annotated pages in it: in place of the matching clean pages, or right after them.
 
+![Demo: drop both PDFs, choose what happens to each annotated slide, open folded slides, download the merged PDF](demo/demo.gif)
+
 **Use it online: <https://chatw.ch/keynote-pdf-branch-merger/>**, or download [`docs/index.html`](docs/index.html) and double-click it to use it offline.
 
 ## For students
@@ -34,6 +36,13 @@ The PDFs need to come from keynote-pdf-brancher, the lecturer's tool that export
 npm install
 npm test
 npm run build   # writes docs/index.html, the page GitHub Pages serves
+```
+
+The demo GIF is recorded from the built page with mock slides (`demo/`). It needs Google Chrome and ffmpeg:
+
+```bash
+uv run --with pymupdf scripts/make_demo_slides.py   # demo/Lecture (ahead|complete).pdf
+npm run demo                                        # demo/demo.gif
 ```
 
 See `CLAUDE.md` for the design and its decisions.
