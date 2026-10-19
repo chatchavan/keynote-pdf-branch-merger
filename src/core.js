@@ -76,7 +76,15 @@
   function alignByStamps(ahead, complete) {
     const all = ahead.concat(complete);
     if (all.some((p) => !p.stamp)) {
-      return { mapping: null, reason: all.some((p) => p.stamp) ? 'partial' : 'missing' };
+      const full = (side) => side.every((p) => p.stamp);
+      const none = (side) => !side.some((p) => p.stamp);
+      if (none(ahead) && none(complete)) return { mapping: null, reason: 'missing' };
+      // Typically an (ahead) handed out before the stamp existed, paired
+      // with a (complete) exported later, possibly from an edited deck.
+      if ((full(ahead) && none(complete)) || (none(ahead) && full(complete))) {
+        return { mapping: null, reason: 'one-side' };
+      }
+      return { mapping: null, reason: 'partial' };
     }
     const decks = new Set(all.map((p) => p.stamp.deck));
     if (decks.size > 1) return { mapping: null, reason: 'different-export' };

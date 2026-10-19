@@ -95,14 +95,10 @@ main, .top { max-width: 960px; margin: 0 auto; padding: 0 16px; }
   display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: .85rem; text-align: center; padding: 8px;
 }
 .thumb .placeholder span { background: var(--bg); padding: 2px 8px; border-radius: 4px; }
-.thumb .tag {
-  position: absolute; left: 6px; top: 6px; font-size: .75rem; padding: 1px 6px; border-radius: 4px;
-  background: rgba(0, 0, 0, .65); color: #fff;
-}
-.thumb .badge {
-  position: absolute; right: 6px; top: 6px; font-size: .75rem; padding: 1px 6px; border-radius: 4px;
-  background: var(--accent); color: #fff;
-}
+.thumb .caption { display: flex; gap: 6px; align-items: center; min-height: 1.4rem; margin-bottom: 4px; font-size: .8rem; }
+.thumb .frame { position: relative; }
+.thumb .tag { color: var(--muted); font-weight: 600; }
+.thumb .badge { padding: 0 6px; border-radius: 4px; background: var(--accent); color: #fff; }
 .thumb.replaced canvas { opacity: var(--dim); }
 .thumb .replaced-label {
   position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none;

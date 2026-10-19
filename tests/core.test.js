@@ -56,6 +56,9 @@ test('alignByStamps maps by slide number', async () => {
 test('alignByStamps refuses missing or mismatched stamps', async () => {
   let { a, c } = await infos('unstamped');
   assert.equal(KPM.alignByStamps(a, c).reason, 'missing');
+  const u = await infos('stamped');
+  assert.equal(KPM.alignByStamps(a, u.c).reason, 'one-side');
+  assert.equal(KPM.alignByStamps([...a.slice(0, 1), ...u.a.slice(1)], u.c).reason, 'partial');
   ({ a, c } = await infos('mismatched-deck'));
   assert.equal(KPM.alignByStamps(a, c).reason, 'different-export');
 });

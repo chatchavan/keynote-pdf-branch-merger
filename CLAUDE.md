@@ -46,6 +46,13 @@ Only real annotation objects count (`page.getAnnotations()`), not counting `Link
 - `npm test`: core logic against the fixtures (mapping by stamp and by similarity, annotation counting, row grouping, merge output, naming).
 - **Claude's built-in browser cannot open `file://` pages.** To check the page there, serve the repo over http (`python3 -m http.server 8765` from the repo root, via a `.claude/launch.json` in the session's primary working directory). Then load files via `fetch('/tests/fixtures/...')` → `File` → `KPMApp.assign(role, file)`, or dispatch a `drop` event with a `DataTransfer`. Intercept `HTMLAnchorElement.prototype.click` to capture the download. The `file://`-specific worker path and Safari need the user to check by double-clicking the built file.
 
+- **Real-deck check (2026-10-19)** with a 44-slide lecture deck (16 ahead / 32 complete pages, ~27 MB each), with simulated annotations (ink, highlight + note, free text):
+  - Stamped pair from one export: mapped by stamp, the right 3 rows switched on, 32-page output with the annotations on the right pages and every stamp kept.
+  - Old unstamped ahead against a complete exported later from an *edited* deck (only 6 of 16 ahead pages still pixel-identical): content matching gave the same, correct mapping. Edited pages scored 0.74–0.89, so none were flagged.
+  - Reading both files took ~5 s and merging ~0.5 s. The output grew by ~7% (1.9 MB for 3 replaced pages), apparently because copied pages bring their own copies of resources the complete file already has.
+  - Copy test PDFs into a git-ignored `.e2e/` folder to serve them, and delete it afterwards: they are course material.
+- The local static server sends no cache headers, so after `npm run build` reload with a new query string (`?v=N`), or the browser keeps the old build.
+
 ## Common Commands
 ```bash
 npm install          # dev deps only (pdfjs-dist, pdf-lib), used to refresh vendor/ and run tests

@@ -102,14 +102,10 @@ main, .top { max-width: 960px; margin: 0 auto; padding: 0 16px; }
   display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: .85rem; text-align: center; padding: 8px;
 }
 .thumb .placeholder span { background: var(--bg); padding: 2px 8px; border-radius: 4px; }
-.thumb .tag {
-  position: absolute; left: 6px; top: 6px; font-size: .75rem; padding: 1px 6px; border-radius: 4px;
-  background: rgba(0, 0, 0, .65); color: #fff;
-}
-.thumb .badge {
-  position: absolute; right: 6px; top: 6px; font-size: .75rem; padding: 1px 6px; border-radius: 4px;
-  background: var(--accent); color: #fff;
-}
+.thumb .caption { display: flex; gap: 6px; align-items: center; min-height: 1.4rem; margin-bottom: 4px; font-size: .8rem; }
+.thumb .frame { position: relative; }
+.thumb .tag { color: var(--muted); font-weight: 600; }
+.thumb .badge { padding: 0 6px; border-radius: 4px; background: var(--accent); color: #fff; }
 .thumb.replaced canvas { opacity: var(--dim); }
 .thumb .replaced-label {
   position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none;
@@ -333,7 +329,15 @@ main, .top { max-width: 960px; margin: 0 auto; padding: 0 16px; }
   function alignByStamps(ahead, complete) {
     const all = ahead.concat(complete);
     if (all.some((p) => !p.stamp)) {
-      return { mapping: null, reason: all.some((p) => p.stamp) ? 'partial' : 'missing' };
+      const full = (side) => side.every((p) => p.stamp);
+      const none = (side) => !side.some((p) => p.stamp);
+      if (none(ahead) && none(complete)) return { mapping: null, reason: 'missing' };
+      // Typically an (ahead) handed out before the stamp existed, paired
+      // with a (complete) exported later, possibly from an edited deck.
+      if ((full(ahead) && none(complete)) || (none(ahead) && full(complete))) {
+        return { mapping: null, reason: 'one-side' };
+      }
+      return { mapping: null, reason: 'partial' };
     }
     const decks = new Set(all.map((p) => p.stamp.deck));
     if (decks.size > 1) return { mapping: null, reason: 'different-export' };
@@ -762,6 +766,7 @@ main, .top { max-width: 960px; margin: 0 auto; padding: 0 16px; }
       ({ mapping, scores } = KPM.alignBySimilarity(a.infos, c.infos));
       const why = {
         missing: 'These PDFs carry no slide IDs (they were made before the IDs were added).',
+        'one-side': 'Only one of the two files carries slide IDs, so they come from different exports of the slides (the slides may have changed in between).',
         partial: 'Only some pages carry slide IDs.',
         'different-export': 'The two files come from different exports of the slides, so their slide IDs do not match.',
         'not-subset': 'The slide IDs of the two files do not line up.',
@@ -790,29 +795,37 @@ main, .top { max-width: 960px; margin: 0 auto; padding: 0 16px; }
   function thumbCell(role, idx, row) {
     const cell = document.createElement('div');
     cell.className = 'thumb';
+    // Caption above the picture, so it never covers the slide's own title.
+    const caption = document.createElement('div');
+    caption.className = 'caption';
+    cell.appendChild(caption);
+    const frame = document.createElement('div');
+    frame.className = 'frame';
+    cell.appendChild(frame);
     if (idx === null) {
-      cell.innerHTML = '<div class="placeholder"><span>Not in your (ahead) file</span></div>';
+      caption.innerHTML = '&nbsp;';
+      frame.innerHTML = '<div class="placeholder"><span>Not in your (ahead) file</span></div>';
       return cell;
     }
     const side = state.pages[role];
     const info = side.infos[idx];
-    cell.appendChild(side.canvases[idx]);
+    frame.appendChild(side.canvases[idx]);
     const tag = document.createElement('span');
     tag.className = 'tag';
     tag.textContent = label(role, info);
-    cell.appendChild(tag);
+    caption.appendChild(tag);
     if (info.annotCount) {
       const badge = document.createElement('span');
       badge.className = 'badge';
-      badge.textContent = `✎ ${info.annotCount}`;
-      badge.title = `${info.annotCount} annotation(s): ${info.annotTypes.join(', ')}`;
-      cell.appendChild(badge);
+      badge.textContent = `✎ ${info.annotCount} annotation${info.annotCount === 1 ? '' : 's'}`;
+      badge.title = info.annotTypes.join(', ');
+      caption.appendChild(badge);
     }
     if (role === 'complete') {
       const rep = document.createElement('div');
       rep.className = 'replaced-label';
       rep.innerHTML = '<span>replaced by your (ahead) page</span>';
-      cell.appendChild(rep);
+      frame.appendChild(rep);
     }
     return cell;
   }

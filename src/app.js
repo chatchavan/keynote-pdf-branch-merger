@@ -241,6 +241,7 @@
       ({ mapping, scores } = KPM.alignBySimilarity(a.infos, c.infos));
       const why = {
         missing: 'These PDFs carry no slide IDs (they were made before the IDs were added).',
+        'one-side': 'Only one of the two files carries slide IDs, so they come from different exports of the slides (the slides may have changed in between).',
         partial: 'Only some pages carry slide IDs.',
         'different-export': 'The two files come from different exports of the slides, so their slide IDs do not match.',
         'not-subset': 'The slide IDs of the two files do not line up.',
@@ -269,29 +270,37 @@
   function thumbCell(role, idx, row) {
     const cell = document.createElement('div');
     cell.className = 'thumb';
+    // Caption above the picture, so it never covers the slide's own title.
+    const caption = document.createElement('div');
+    caption.className = 'caption';
+    cell.appendChild(caption);
+    const frame = document.createElement('div');
+    frame.className = 'frame';
+    cell.appendChild(frame);
     if (idx === null) {
-      cell.innerHTML = '<div class="placeholder"><span>Not in your (ahead) file</span></div>';
+      caption.innerHTML = '&nbsp;';
+      frame.innerHTML = '<div class="placeholder"><span>Not in your (ahead) file</span></div>';
       return cell;
     }
     const side = state.pages[role];
     const info = side.infos[idx];
-    cell.appendChild(side.canvases[idx]);
+    frame.appendChild(side.canvases[idx]);
     const tag = document.createElement('span');
     tag.className = 'tag';
     tag.textContent = label(role, info);
-    cell.appendChild(tag);
+    caption.appendChild(tag);
     if (info.annotCount) {
       const badge = document.createElement('span');
       badge.className = 'badge';
-      badge.textContent = `✎ ${info.annotCount}`;
-      badge.title = `${info.annotCount} annotation(s): ${info.annotTypes.join(', ')}`;
-      cell.appendChild(badge);
+      badge.textContent = `✎ ${info.annotCount} annotation${info.annotCount === 1 ? '' : 's'}`;
+      badge.title = info.annotTypes.join(', ');
+      caption.appendChild(badge);
     }
     if (role === 'complete') {
       const rep = document.createElement('div');
       rep.className = 'replaced-label';
       rep.innerHTML = '<span>replaced by your (ahead) page</span>';
-      cell.appendChild(rep);
+      frame.appendChild(rep);
     }
     return cell;
   }
