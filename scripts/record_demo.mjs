@@ -1,13 +1,15 @@
-// Record demo/demo.gif: drive the built page (docs/index.html, opened from
-// file:// like a student would) in headless Chrome with a drawn cursor,
+// Record demo/demo.gif: drive the built page (docs/index.html, served over
+// http from a throwaway local server so it looks like the online version,
+// download link included) in headless Chrome with a drawn cursor,
 // capture one PNG per step, and turn them into a GIF with ffmpeg.
 // Needs Google Chrome and ffmpeg. Run: npm run demo
 // Env: CHROME (path to Chrome), FFMPEG (path to ffmpeg), KEEP_FRAMES=1.
 import fs from 'node:fs';
+import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 import puppeteer from 'puppeteer-core';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -22,12 +24,19 @@ const frames = fs.mkdtempSync(path.join(os.tmpdir(), 'kpm-demo-'));
 let n = 0;
 let last = null;
 
+const page1 = fs.readFileSync(path.join(root, 'docs', 'index.html'));
+const server = http.createServer((req, res) => {
+  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+  res.end(page1);
+});
+await new Promise((r) => server.listen(0, '127.0.0.1', r));
+
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, defaultViewport: { width: W, height: H } });
 const page = await browser.newPage();
 const cdp = await page.createCDPSession();
 await cdp.send('Browser.setDownloadBehavior', { behavior: 'allow', downloadPath: frames });
 await page.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: 'light' }]);
-await page.goto(pathToFileURL(path.join(root, 'docs', 'index.html')).href);
+await page.goto(`http://127.0.0.1:${server.address().port}/`);
 
 // Cursor, drag chip, click ripple and toast drawn over the page; none of
 // them takes pointer events, so real clicks reach the page underneath.
@@ -205,6 +214,7 @@ await shot();
 await hold(25);
 
 await browser.close();
+server.close();
 
 execFileSync(FFMPEG, ['-y', '-loglevel', 'error', '-framerate', String(FPS), '-i', path.join(frames, '%04d.png'),
   '-vf', 'scale=800:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=128:stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle',

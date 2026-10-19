@@ -563,7 +563,19 @@
     }
   }
 
+  // "Download offline version": saves this very page. Pointing at the page's
+  // own address keeps it right however the site is served. An offline copy
+  // opened from disk already is the offline version, so the link is hidden.
+  function wireOfflineLink() {
+    if (location.protocol === 'file:') {
+      $('#offline-link').hidden = true;
+      return;
+    }
+    $('#offline-download').href = location.href.split('#')[0];
+  }
+
   wireInputs();
+  wireOfflineLink();
   // Exposed for debugging and for automated checks of the page.
   window.KPMApp = { state, assign, setupWorker };
 })();

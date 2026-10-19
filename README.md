@@ -1,4 +1,4 @@
-# Keynote PDF Merger
+# PDF slides merger
 
 Bring the notes you wrote on the **(ahead)** slides into the **(complete)** slides.
 
@@ -6,11 +6,11 @@ Before class you get `Lecture (ahead).pdf`. After class you get `Lecture (comple
 
 ![Demo: drop both PDFs, choose what happens to each annotated slide, open folded slides, download the merged PDF](demo/demo.gif)
 
-**Use it online: <https://chatw.ch/keynote-pdf-branch-merger/>**, or download [`docs/index.html`](docs/index.html) and double-click it to use it offline.
+**Use it online: <https://chatw.ch/keynote-pdf-branch-merger/>**, or use the page's **Download offline version to use on your computer** link (it saves `PDF-slides-merger.html`) and double-click that file to use it offline.
 
 ## For students
 
-1. Open **<https://chatw.ch/keynote-pdf-branch-merger/>**, or double-click a downloaded copy of `docs/index.html`. It works in Chrome, Edge, Safari or Firefox. Nothing is installed and your files never leave your computer: the page reads them inside your browser and uploads nothing.
+1. Open **<https://chatw.ch/keynote-pdf-branch-merger/>**, or double-click the offline copy `PDF-slides-merger.html` you downloaded from it. It works in Chrome, Edge, Safari or Firefox. Nothing is installed and your files never leave your computer: the page reads them inside your browser and uploads nothing.
 2. Drop both PDFs onto the page, or choose them with the two **Choose…** buttons. Use **⇄** if they ended up the wrong way round.
 3. Check the two columns: your (ahead) pages on the left, the (complete) pages on the right.
    - Click the round button between two pages to choose what happens:

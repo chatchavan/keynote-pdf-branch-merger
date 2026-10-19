@@ -65,7 +65,7 @@ Only real annotation objects count (`page.getAnnotations()`), not counting `Link
 - The local static server sends no cache headers, so after `npm run build` reload with a new query string (`?v=N`), or the browser keeps the old build.
 
 ## Demo GIF
-- `demo/demo.gif` (README) is recorded by `scripts/record_demo.mjs` (`npm run demo`) from `docs/index.html` opened via `file://`, using `demo/Lecture (ahead|complete).pdf` made by `scripts/make_demo_slides.py`: eight one-big-number slides, slide 5 labelled `(excluded from "ahead" version)`, annotations on slides 2 and 6.
+- `demo/demo.gif` (README) is recorded by `scripts/record_demo.mjs` (`npm run demo`) from `docs/index.html` served by a throwaway local http server inside the script (so the online-only download link shows), using `demo/Lecture (ahead|complete).pdf` made by `scripts/make_demo_slides.py`: eight one-big-number slides, slide 5 labelled `(excluded from "ahead" version)`, annotations on slides 2 and 6.
 - The script drives headless Google Chrome with `puppeteer-core` (dev dependency; no bundled browser, `CHROME` env var overrides the path) and draws its own cursor, drag chip, click ripple and download toast as overlay elements with `pointer-events: none`, so real `page.mouse.click()`s reach the page. One PNG per step, held frames are file copies, and ffmpeg (`FFMPEG` env var; on this machine `~/.stacher/ffmpeg`) builds a 10 fps, 800 px, 128-colour GIF.
 - The file drop is a synthetic `drop` event with a `DataTransfer` built from the PDFs' bytes (OS drags cannot be automated).
 - Stamp IDs in mock PDFs must be real lowercase hex: a made-up `d3m0…` ID was silently not recognised as a stamp, and the page fell back to content matching.
@@ -73,7 +73,8 @@ Only real annotation objects count (`page.getAnnotations()`), not counting `Link
 ## Publishing
 - Public repo <https://github.com/chatchavan/keynote-pdf-branch-merger> (MIT). The site is <https://chatw.ch/keynote-pdf-branch-merger/>: the user site's custom domain serves every `chatchavan/<repo>` Pages site.
 - Pages serves `docs/` from the `main` branch (branch-based, no GitHub Actions; decided). Pushing to `main` publishes.
-- The page links to the repo and its issues page (header of `src/index.html`), so students can report problems.
+- The app is titled **PDF slides merger** (page `<title>` and heading; the repo keeps its name).
+- The header links (in `src/index.html`): **Download offline version to use on your computer**, then Source code and Report a problem (the repo's issues page). The download link has `download="PDF-slides-merger.html"`, and `wireOfflineLink()` points its `href` at the page's own URL; `download` works because the page is same-origin. When the page itself was opened from `file://` (already an offline copy) the link is hidden.
 
 ## Common Commands
 ```bash

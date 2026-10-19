@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Keynote PDF Merger</title>
+<title>PDF slides merger</title>
 <style>
 :root {
   --bg: #f6f6f3;
@@ -180,10 +180,11 @@ main, .top { max-width: 960px; margin: 0 auto; padding: 0 16px; }
 </head>
 <body>
 <header class="top">
-  <h1>Keynote PDF Merger</h1>
+  <h1>PDF slides merger</h1>
   <p class="lede">Bring the notes you wrote on the <b>(ahead)</b> slides into the <b>(complete)</b> slides.
     Everything happens on your computer; your files are not uploaded anywhere.</p>
-  <p class="links"><a href="https://github.com/chatchavan/keynote-pdf-branch-merger" target="_blank" rel="noopener">Source code</a>
+  <p class="links"><span id="offline-link"><a id="offline-download" href="index.html" download="PDF-slides-merger.html">Download offline version to use on your computer</a>
+    · </span><a href="https://github.com/chatchavan/keynote-pdf-branch-merger" target="_blank" rel="noopener">Source code</a>
     · <a href="https://github.com/chatchavan/keynote-pdf-branch-merger/issues" target="_blank" rel="noopener">Report a problem</a></p>
 </header>
 
@@ -1191,7 +1192,19 @@ window.KPM_ICONS = {
     }
   }
 
+  // "Download offline version": saves this very page. Pointing at the page's
+  // own address keeps it right however the site is served. An offline copy
+  // opened from disk already is the offline version, so the link is hidden.
+  function wireOfflineLink() {
+    if (location.protocol === 'file:') {
+      $('#offline-link').hidden = true;
+      return;
+    }
+    $('#offline-download').href = location.href.split('#')[0];
+  }
+
   wireInputs();
+  wireOfflineLink();
   // Exposed for debugging and for automated checks of the page.
   window.KPMApp = { state, assign, setupWorker };
 })();
