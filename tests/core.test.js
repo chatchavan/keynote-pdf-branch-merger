@@ -128,9 +128,9 @@ test('buildRows and groupRows', async () => {
   assert.deepEqual(rows.map((r) => r.action), ['keep', 'keep', 'replace', 'keep', 'keep', 'keep', 'replace', 'replace']);
   assert.equal(rows[6].completeAnnotated, true);
   const groups = KPM.groupRows(rows);
-  // Annotated: slides 4, 9, 10 -> keep 2,4,5 and 7,9,10; slide 1 and slide 6 collapse.
+  // Only annotated rows (slides 4, 9, 10) stay expanded; the rest collapse.
   assert.deepEqual(groups.map((g) => (g.type === 'row' ? g.row.slide : g.rows.map((r) => r.slide))),
-    [[1], 2, 4, 5, [6], 7, 9, 10]);
+    [[1, 2], 4, [5, 6, 7], 9, 10]);
 });
 
 test('groupRows with no annotations collapses everything into one run', () => {
@@ -154,17 +154,17 @@ test('mergePdf replaces chosen pages and keeps their annotations', async () => {
   assert.ok(merged.length < (aheadBytes.length + completeBytes.length), `merged ${merged.length} bytes`);
 });
 
-test('mergePdf inserts after a page when asked, mixed with replacements', async () => {
+test('mergePdf inserts above or below a page when asked, mixed with replacements', async () => {
   const ops = [
-    { aheadIdx: 2, completeIdx: 2, mode: 'insert' },
+    { aheadIdx: 2, completeIdx: 2, mode: 'below' },
     { aheadIdx: 4, completeIdx: 6, mode: 'replace' },
-    { aheadIdx: 5, completeIdx: 7, mode: 'insert' },
+    { aheadIdx: 5, completeIdx: 7, mode: 'above' },
   ];
   const merged = await KPM.mergePdf(PDFLib, read('stamped', 'ahead'), read('stamped', 'complete'), ops);
   const m = await KPM.readAllPageInfo(await open(merged));
-  // complete: 1 2 4 5 6 7 9 10 -> 4 gets an ahead copy after it, 9 is replaced, 10 gets a copy after it.
+  // complete: 1 2 4 5 6 7 9 10 -> an ahead 4 after 4, 9 replaced, an ahead 10 before 10.
   assert.deepEqual(m.map((p) => p.stamp.slide), [1, 2, 4, 4, 5, 6, 7, 9, 10, 10]);
-  assert.deepEqual(m.map((p) => p.annotCount), [0, 0, 0, 1, 0, 0, 0, 2, 0, 1]);
+  assert.deepEqual(m.map((p) => p.annotCount), [0, 0, 0, 1, 0, 0, 0, 2, 1, 0]);
 });
 
 test('mergePdf with no replacements returns complete unchanged in content', async () => {

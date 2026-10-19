@@ -77,6 +77,9 @@ main, .top { max-width: 960px; margin: 0 auto; padding: 0 16px; }
 
 /* Board */
 .board { margin-bottom: 96px; }
+/* toggleRun() keeps the viewed rows in place itself; the browser's own
+   scroll anchoring would shift them a second time. */
+#rows { overflow-anchor: none; }
 .board-head, .row {
   display: grid; grid-template-columns: minmax(0, 1fr) 72px minmax(0, 1fr); gap: 8px; align-items: center;
 }
@@ -104,7 +107,7 @@ main, .top { max-width: 960px; margin: 0 auto; padding: 0 16px; }
   position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none;
   font-weight: 600; font-size: .85rem; color: var(--text);
 }
-.thumb .replaced-label span { background: var(--surface); border: 1px solid var(--line); border-radius: 4px; padding: 2px 8px; }
+.thumb .replaced-label span { background: var(--surface); border: 1px solid var(--line); border-radius: 4px; padding: 2px 8px; white-space: nowrap; font-size: .8rem; }
 .row-warning { grid-column: 1 / -1; font-size: .85rem; color: var(--warn); padding: 0 4px; }
 .row-warning.note { color: var(--muted); }
 
@@ -114,14 +117,15 @@ main, .top { max-width: 960px; margin: 0 auto; padding: 0 16px; }
   font-size: 1.6rem; cursor: pointer; line-height: 1;
 }
 .toggle:hover { border-color: var(--accent); }
-.toggle[data-action="replace"], .toggle[data-action="insert"] {
+.toggle[data-action="replace"], .toggle[data-action="above"], .toggle[data-action="below"] {
   border-style: solid; background: var(--accent); border-color: var(--accent); color: #fff;
 }
-.toggle .icon { display: block; min-height: 1.6rem; }
+.toggle .icon { display: flex; justify-content: center; min-height: 26px; }
+.toggle .icon svg { width: 26px; height: 26px; }
 .toggle .q { display: block; font-size: .7rem; }
 
 .action-menu {
-  position: absolute; z-index: 10; min-width: 260px; padding: 4px;
+  position: absolute; z-index: 10; min-width: 220px; padding: 4px;
   background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
   box-shadow: 0 6px 24px rgba(0, 0, 0, .18);
 }
@@ -130,7 +134,8 @@ main, .top { max-width: 960px; margin: 0 auto; padding: 0 16px; }
   border: 0; border-radius: 6px; background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer;
 }
 .action-item:hover, .action-item:focus-visible { background: var(--accent-soft); outline: none; }
-.action-item .icon { width: 1.4em; text-align: center; font-size: 1.2rem; }
+.action-item .icon { display: flex; justify-content: center; width: 20px; height: 20px; flex: none; }
+.action-item .icon svg { width: 20px; height: 20px; }
 .action-item[aria-checked="true"] { font-weight: 600; }
 .action-item[aria-checked="true"]::after { content: "✓"; margin-left: auto; color: var(--accent); }
 .no-toggle { justify-self: center; color: var(--muted); }

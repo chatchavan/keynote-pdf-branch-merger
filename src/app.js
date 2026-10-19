@@ -19,7 +19,6 @@
     run: 0,          // bumps on every new load so stale async work is dropped
     rows: [],
     pages: null,     // {ahead: {infos, canvases, bytes}, complete: {...}}
-    expanded: new Set(),
     pdfWorker: null,
     matchedByStamp: false,
   };
@@ -260,7 +259,6 @@
     state.matchedByStamp = !!byStamp.mapping;
     state.pages = { ahead: a, complete: c };
     state.rows = KPM.buildRows(a.infos, c.infos, mapping, match);
-    state.expanded = new Set();
     const annotated = state.rows.filter((r) => r.aheadAnnotated).length;
     if (!annotated) {
       message('No annotations were found in your (ahead) file. Ink that an app has “flattened” into the page cannot be detected: open the slides below and pick pages by hand.', 'warn');
@@ -353,7 +351,7 @@
     if (btn) {
       const act = ACTIONS[row.action];
       btn.dataset.action = row.action;
-      btn.innerHTML = `<span class="icon">${act.icon}</span>` + (row.uncertain ? '<span class="q">?</span>' : '');
+      btn.innerHTML = `<span class="icon">${iconHtml(act.icon)}</span>` + (row.uncertain ? '<span class="q">?</span>' : '');
       btn.setAttribute('aria-label', `${act.label}. Click to change.`);
       btn.title = `${act.label}. Click to change.`
         + (row.uncertain ? ' These two pages differ (the slide may have been edited between the two exports): check that they show the same slide.' : '');
@@ -362,11 +360,12 @@
     completeCell.classList.toggle('replaced', replaced);
     if (repLabel) repLabel.hidden = !replaced;
     const warn = el.querySelector('.row-warning');
-    warn.classList.toggle('note', row.action === 'insert');
+    const inserting = row.action === 'above' || row.action === 'below';
+    warn.classList.toggle('note', inserting);
     if (replaced && row.completeAnnotated) {
-      warn.textContent = '⚠ This (complete) page has annotations of its own. They will be lost if you replace it; insert your (ahead) page after it instead to keep both.';
-    } else if (row.action === 'insert') {
-      warn.textContent = '⤷ Your (ahead) page will be inserted right after this (complete) page.';
+      warn.textContent = '⚠ This (complete) page has annotations of its own. They will be lost if you replace it; insert your (ahead) page above or below it instead to keep both.';
+    } else if (inserting) {
+      warn.textContent = `Your (ahead) page will be inserted right ${row.action === 'above' ? 'before' : 'after'} this (complete) page.`;
     } else {
       warn.textContent = '';
     }
@@ -374,12 +373,18 @@
   }
 
   // ---------- per-row action menu ----------
+  // Icons: Lucide (vendor/lucide, via src/icons.js); 'keep' shows none.
   const ACTIONS = {
-    replace: { icon: '→', label: 'Replace with your (ahead) page' },
-    insert: { icon: '⤷', label: 'Insert your (ahead) page after this page' },
-    keep: { icon: '', label: 'Use the page from the (complete) version' },
+    replace: { icon: 'move-right', label: 'Replace' },
+    above: { icon: 'corner-up-right', label: 'Insert above' },
+    below: { icon: 'corner-down-right', label: 'Insert below' },
+    keep: { icon: null, label: 'Use the page from the right' },
   };
   let menu = null;
+
+  function iconHtml(name) {
+    return name ? window.KPM_ICONS[name] : '';
+  }
 
   function closeActionMenu(refocus) {
     if (!menu) return;
@@ -410,7 +415,7 @@
       item.setAttribute('role', 'menuitemradio');
       item.setAttribute('aria-checked', String(row.action === id));
       item.innerHTML = '<span class="icon"></span><span class="text"></span>';
-      item.querySelector('.icon').textContent = act.icon;
+      item.querySelector('.icon').innerHTML = iconHtml(act.icon);
       item.querySelector('.text').textContent = act.label;
       item.addEventListener('click', () => {
         row.action = id;
@@ -460,30 +465,60 @@
         host.appendChild(rowElement(g.row));
         continue;
       }
-      const key = g.rows[0].completeIdx;
-      const open = state.expanded.has(key);
       const bar = document.createElement('button');
       bar.type = 'button';
       bar.className = 'run';
-      bar.textContent = runLabel(g.rows, open);
-      bar.setAttribute('aria-expanded', String(open));
-      bar.addEventListener('click', () => {
-        if (open) state.expanded.delete(key); else state.expanded.add(key);
-        const y = bar.getBoundingClientRect().top;
-        renderBoard();
-        // Keep the clicked bar where it was on screen.
-        const again = [...document.querySelectorAll('.run')].find((b) => b.dataset.key === String(key));
-        if (again) window.scrollBy(0, again.getBoundingClientRect().top - y);
-      });
-      bar.dataset.key = String(key);
+      bar.textContent = runLabel(g.rows, false);
+      bar.setAttribute('aria-expanded', 'false');
+      bar.addEventListener('click', () => toggleRun(bar, g.rows));
       host.appendChild(bar);
-      if (open) {
-        const body = document.createElement('div');
-        body.className = 'run-body';
-        g.rows.forEach((r) => body.appendChild(rowElement(r)));
-        host.appendChild(body);
+    }
+  }
+
+  /*
+   * Expand or collapse one run in place. The slide row the student is most
+   * likely looking at (the one most fully on screen; on a tie, the one below
+   * the bar) keeps its position, so rows expanded between it and the bar
+   * push the bar away instead. With no slide row on screen, the bar stays put.
+   */
+  function toggleRun(bar, rows) {
+    closeActionMenu(false);
+    const anchor = nearestVisibleRow(bar) || bar;
+    const before = anchor.getBoundingClientRect().top;
+    const open = bar.getAttribute('aria-expanded') === 'true';
+    if (open) {
+      bar.nextElementSibling.remove();
+    } else {
+      const body = document.createElement('div');
+      body.className = 'run-body';
+      rows.forEach((r) => body.appendChild(rowElement(r)));
+      bar.after(body);
+    }
+    bar.setAttribute('aria-expanded', String(!open));
+    bar.textContent = runLabel(rows, !open);
+    window.scrollBy(0, anchor.getBoundingClientRect().top - before);
+  }
+
+  function nearestVisibleRow(bar) {
+    const top = $('.board-head').getBoundingClientRect().bottom;
+    const bottom = $('#actionbar').getBoundingClientRect().top;
+    const barTop = bar.getBoundingClientRect().top;
+    const own = bar.nextElementSibling && bar.nextElementSibling.classList.contains('run-body')
+      ? bar.nextElementSibling : null;
+    let best = null;
+    let bestShown = 0;
+    for (const row of document.querySelectorAll('#rows .row')) {
+      if (own && own.contains(row)) continue;  // these rows go away on collapse
+      const r = row.getBoundingClientRect();
+      const shown = Math.min(r.bottom, bottom) - Math.max(r.top, top);
+      if (shown <= 0) continue;
+      const below = r.top > barTop;
+      if (shown > bestShown + 0.5 || (Math.abs(shown - bestShown) <= 0.5 && below)) {
+        best = row;
+        bestShown = shown;
       }
     }
+    return best;
   }
 
   function chosen() {

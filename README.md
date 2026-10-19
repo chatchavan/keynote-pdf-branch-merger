@@ -10,15 +10,17 @@ Before class you get `Lecture (ahead).pdf`. After class you get `Lecture (comple
 2. Drop both PDFs onto the page, or choose them with the two **Choose…** buttons. Use **⇄** if they ended up the wrong way round.
 3. Check the two columns: your (ahead) pages on the left, the (complete) pages on the right.
    - Click the round button between two pages to choose what happens:
-     - **→** replace the (complete) page with your (ahead) page,
-     - **⤷** insert your (ahead) page right after the (complete) page, keeping both,
-     - (empty) use the page from the (complete) version.
-   - Pages with your annotations are set to **→** automatically and marked with ✎.
+     - **Replace**: your (ahead) page takes the place of the (complete) page,
+     - **Insert above** / **Insert below**: your (ahead) page goes right before / after the (complete) page, keeping both,
+     - **Use the page from the right**: keep the (complete) page (the button then shows an empty circle).
+   - Pages with your annotations are set to **Replace** automatically and marked with ✎.
    - Slides without annotations are folded into a bar such as "▸ 5 slides without annotations"; click it to open them.
    - A striped box on the left means that slide was not in the (ahead) version.
-   - ⚠ means you had also annotated that page in the (complete) file. Those notes are lost if you replace it; choose **⤷** to keep both.
+   - ⚠ means you had also annotated that page in the (complete) file. Those notes are lost if you replace it; choose **Insert above** or **Insert below** to keep both.
    - **?** means the two pages are not identical, usually because the slide was edited between the two versions; check that they show the same slide.
 4. Change the file name if you like, then click **Download merged PDF**.
+
+Icons: [Lucide](https://lucide.dev) (ISC License).
 
 Only annotations your PDF app saves as annotations (most apps' default: Preview, Acrobat, PDF Expert, GoodNotes/Notability without "flatten") are detected automatically. If your app flattened your ink into the page, open the folded slides and choose pages by hand.
 

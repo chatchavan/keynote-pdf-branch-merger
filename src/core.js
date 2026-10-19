@@ -228,23 +228,19 @@
         completeAnnotated: c.annotCount > 0,
         uncertain,
         slide: c.stamp ? c.stamp.slide : null,
-        // 'replace' | 'insert' | 'keep': what happens with the ahead page.
+        // 'replace' | 'above' | 'below' | 'keep': what happens with the ahead page.
         action: a && a.annotCount ? 'replace' : 'keep',
       };
     });
   }
 
   /*
-   * Split rows into what the UI shows: rows whose ahead page has annotations,
-   * plus the row before and after each, stay expanded; every other run of
-   * rows becomes one collapsed group. Returns [{type:'row', row} | {type:'run', rows}].
+   * Split rows into what the UI shows: rows whose ahead page has annotations
+   * stay expanded; every run of other rows becomes one collapsed group.
+   * Returns [{type:'row', row} | {type:'run', rows}].
    */
   function groupRows(rows) {
-    const keep = rows.map(() => false);
-    rows.forEach((r, i) => {
-      if (!r.aheadAnnotated) return;
-      for (const k of [i - 1, i, i + 1]) if (k >= 0 && k < rows.length) keep[k] = true;
-    });
+    const keep = rows.map((r) => r.aheadAnnotated);
     const out = [];
     let run = [];
     rows.forEach((r, i) => {
@@ -263,8 +259,9 @@
   /*
    * Bring pages of (ahead) into (complete).
    * ops: [{aheadIdx, completeIdx, mode}], mode 'replace' (default: the ahead
-   * page takes the complete page's place) or 'insert' (the ahead page goes
-   * right after the complete page, which stays). Returns Uint8Array.
+   * page takes the complete page's place), 'above' or 'below' (the ahead
+   * page goes right before or after the complete page, which stays).
+   * Returns Uint8Array.
    */
   async function mergePdf(PDFLib, aheadBytes, completeBytes, ops) {
     const { PDFDocument, PDFName } = PDFLib;
@@ -287,7 +284,9 @@
     const order = ops.map((op, k) => k).sort((x, y) => ops[y].completeIdx - ops[x].completeIdx);
     for (const k of order) {
       const { completeIdx, mode } = ops[k];
-      if (mode === 'insert') {
+      if (mode === 'above') {
+        out.insertPage(completeIdx, copied[k]);
+      } else if (mode === 'below') {
         out.insertPage(completeIdx + 1, copied[k]);
       } else {
         out.removePage(completeIdx);
