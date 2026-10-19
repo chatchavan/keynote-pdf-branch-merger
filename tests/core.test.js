@@ -125,7 +125,7 @@ test('buildRows and groupRows', async () => {
   assert.equal(rows.length, c.length);
   // Slides 5 and 6 are complete-only.
   assert.deepEqual(rows.map((r) => r.aheadIdx), [0, 1, 2, null, null, 3, 4, 5]);
-  assert.deepEqual(rows.map((r) => r.useAhead), [false, false, true, false, false, false, true, true]);
+  assert.deepEqual(rows.map((r) => r.action), ['keep', 'keep', 'replace', 'keep', 'keep', 'keep', 'replace', 'replace']);
   assert.equal(rows[6].completeAnnotated, true);
   const groups = KPM.groupRows(rows);
   // Annotated: slides 4, 9, 10 -> keep 2,4,5 and 7,9,10; slide 1 and slide 6 collapse.
@@ -152,6 +152,19 @@ test('mergePdf replaces chosen pages and keeps their annotations', async () => {
   assert.deepEqual(m[6].annotTypes.sort(), ['Highlight', 'Text']);
   // No whole-document bloat from /P back-references.
   assert.ok(merged.length < (aheadBytes.length + completeBytes.length), `merged ${merged.length} bytes`);
+});
+
+test('mergePdf inserts after a page when asked, mixed with replacements', async () => {
+  const ops = [
+    { aheadIdx: 2, completeIdx: 2, mode: 'insert' },
+    { aheadIdx: 4, completeIdx: 6, mode: 'replace' },
+    { aheadIdx: 5, completeIdx: 7, mode: 'insert' },
+  ];
+  const merged = await KPM.mergePdf(PDFLib, read('stamped', 'ahead'), read('stamped', 'complete'), ops);
+  const m = await KPM.readAllPageInfo(await open(merged));
+  // complete: 1 2 4 5 6 7 9 10 -> 4 gets an ahead copy after it, 9 is replaced, 10 gets a copy after it.
+  assert.deepEqual(m.map((p) => p.stamp.slide), [1, 2, 4, 4, 5, 6, 7, 9, 10, 10]);
+  assert.deepEqual(m.map((p) => p.annotCount), [0, 0, 0, 1, 0, 0, 0, 2, 0, 1]);
 });
 
 test('mergePdf with no replacements returns complete unchanged in content', async () => {

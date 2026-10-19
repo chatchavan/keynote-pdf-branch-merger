@@ -331,12 +331,11 @@
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'toggle';
-      btn.innerHTML = '→' + (row.uncertain ? '<span class="q">?</span>' : '');
-      btn.addEventListener('click', () => {
-        row.useAhead = !row.useAhead;
+      btn.setAttribute('aria-haspopup', 'menu');
+      btn.addEventListener('click', () => openActionMenu(btn, row, () => {
         updateRow(el, row);
         updateSummary();
-      });
+      }));
       el.appendChild(btn);
     }
     el.appendChild(thumbCell('complete', row.completeIdx, row));
@@ -352,17 +351,95 @@
     const completeCell = el.children[2];
     const repLabel = completeCell.querySelector('.replaced-label');
     if (btn) {
-      btn.setAttribute('aria-pressed', String(row.useAhead));
-      btn.title = (row.useAhead ? 'Using your (ahead) page. Click to keep the (complete) page.'
-        : 'Keeping the (complete) page. Click to use your (ahead) page instead.')
+      const act = ACTIONS[row.action];
+      btn.dataset.action = row.action;
+      btn.innerHTML = `<span class="icon">${act.icon}</span>` + (row.uncertain ? '<span class="q">?</span>' : '');
+      btn.setAttribute('aria-label', `${act.label}. Click to change.`);
+      btn.title = `${act.label}. Click to change.`
         + (row.uncertain ? ' These two pages differ (the slide may have been edited between the two exports): check that they show the same slide.' : '');
     }
-    completeCell.classList.toggle('replaced', row.useAhead);
-    if (repLabel) repLabel.hidden = !row.useAhead;
+    const replaced = row.action === 'replace';
+    completeCell.classList.toggle('replaced', replaced);
+    if (repLabel) repLabel.hidden = !replaced;
     const warn = el.querySelector('.row-warning');
-    const lose = row.useAhead && row.completeAnnotated;
-    warn.hidden = !lose;
-    warn.textContent = lose ? '⚠ This (complete) page has annotations of its own. They will be lost if you use the (ahead) page.' : '';
+    warn.classList.toggle('note', row.action === 'insert');
+    if (replaced && row.completeAnnotated) {
+      warn.textContent = '⚠ This (complete) page has annotations of its own. They will be lost if you replace it; insert your (ahead) page after it instead to keep both.';
+    } else if (row.action === 'insert') {
+      warn.textContent = '⤷ Your (ahead) page will be inserted right after this (complete) page.';
+    } else {
+      warn.textContent = '';
+    }
+    warn.hidden = !warn.textContent;
+  }
+
+  // ---------- per-row action menu ----------
+  const ACTIONS = {
+    replace: { icon: '→', label: 'Replace with your (ahead) page' },
+    insert: { icon: '⤷', label: 'Insert your (ahead) page after this page' },
+    keep: { icon: '', label: 'Use the page from the (complete) version' },
+  };
+  let menu = null;
+
+  function closeActionMenu(refocus) {
+    if (!menu) return;
+    const { el, button } = menu;
+    menu = null;
+    el.remove();
+    document.removeEventListener('pointerdown', onOutside, true);
+    if (refocus) button.focus();
+  }
+
+  function onOutside(e) {
+    if (menu && !menu.el.contains(e.target) && e.target !== menu.button && !menu.button.contains(e.target)) {
+      closeActionMenu(false);
+    }
+  }
+
+  function openActionMenu(button, row, onChange) {
+    const reopen = menu && menu.button === button;
+    closeActionMenu(false);
+    if (reopen) return;  // a second click on the same arrow closes its menu
+    const el = document.createElement('div');
+    el.className = 'action-menu';
+    el.setAttribute('role', 'menu');
+    const items = Object.entries(ACTIONS).map(([id, act]) => {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'action-item';
+      item.setAttribute('role', 'menuitemradio');
+      item.setAttribute('aria-checked', String(row.action === id));
+      item.innerHTML = '<span class="icon"></span><span class="text"></span>';
+      item.querySelector('.icon').textContent = act.icon;
+      item.querySelector('.text').textContent = act.label;
+      item.addEventListener('click', () => {
+        row.action = id;
+        closeActionMenu(true);
+        onChange();
+      });
+      el.appendChild(item);
+      return item;
+    });
+    el.addEventListener('keydown', (e) => {
+      const k = items.indexOf(document.activeElement);
+      if (e.key === 'Escape') { e.preventDefault(); closeActionMenu(true); }
+      else if (e.key === 'ArrowDown') { e.preventDefault(); items[(k + 1) % items.length].focus(); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); items[(k - 1 + items.length) % items.length].focus(); }
+      else if (e.key === 'Tab') closeActionMenu(false);
+    });
+    document.body.appendChild(el);
+    // Place it below the arrow, kept inside the window.
+    const b = button.getBoundingClientRect();
+    const w = el.offsetWidth;
+    const h = el.offsetHeight;
+    const left = Math.max(8, Math.min(b.left + b.width / 2 - w / 2, window.innerWidth - w - 8));
+    const below = b.bottom + 6;
+    const top = below + h > window.innerHeight - 8 ? Math.max(8, b.top - h - 6) : below;
+    el.style.left = `${left + window.scrollX}px`;
+    el.style.top = `${top + window.scrollY}px`;
+    menu = { el, button };
+    document.addEventListener('pointerdown', onOutside, true);
+    items[Object.keys(ACTIONS).indexOf(row.action)].focus();
   }
 
   function runLabel(rows, open) {
@@ -375,6 +452,7 @@
   }
 
   function renderBoard() {
+    closeActionMenu(false);
     const host = $('#rows');
     host.innerHTML = '';
     for (const g of KPM.groupRows(state.rows)) {
@@ -409,15 +487,21 @@
   }
 
   function chosen() {
-    return state.rows.filter((r) => r.useAhead && r.aheadIdx !== null)
-      .map((r) => ({ aheadIdx: r.aheadIdx, completeIdx: r.completeIdx }));
+    return state.rows.filter((r) => r.action !== 'keep' && r.aheadIdx !== null)
+      .map((r) => ({ aheadIdx: r.aheadIdx, completeIdx: r.completeIdx, mode: r.action }));
   }
 
   function updateSummary() {
-    const n = chosen().length;
-    $('#summary').textContent = n === 0 ? 'No pages chosen from (ahead) yet.'
-      : `${n} page${n === 1 ? '' : 's'} will come from your (ahead) file.`;
-    $('#download').disabled = n === 0;
+    const ops = chosen();
+    const replaced = ops.filter((op) => op.mode === 'replace').length;
+    const inserted = ops.length - replaced;
+    const pages = (n) => `${n} page${n === 1 ? '' : 's'}`;
+    const parts = [];
+    if (replaced) parts.push(`${pages(replaced)} replaced`);
+    if (inserted) parts.push(`${pages(inserted)} inserted`);
+    $('#summary').textContent = ops.length === 0 ? 'No pages chosen from (ahead) yet.'
+      : `From your (ahead) file: ${parts.join(', ')}.`;
+    $('#download').disabled = ops.length === 0;
   }
 
   // ---------- output ----------

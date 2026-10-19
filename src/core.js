@@ -228,7 +228,8 @@
         completeAnnotated: c.annotCount > 0,
         uncertain,
         slide: c.stamp ? c.stamp.slide : null,
-        useAhead: !!(a && a.annotCount),
+        // 'replace' | 'insert' | 'keep': what happens with the ahead page.
+        action: a && a.annotCount ? 'replace' : 'keep',
       };
     });
   }
@@ -260,30 +261,39 @@
   }
 
   /*
-   * Replace pages of (complete) with pages of (ahead).
-   * replacements: [{aheadIdx, completeIdx}]. Returns Uint8Array.
+   * Bring pages of (ahead) into (complete).
+   * ops: [{aheadIdx, completeIdx, mode}], mode 'replace' (default: the ahead
+   * page takes the complete page's place) or 'insert' (the ahead page goes
+   * right after the complete page, which stays). Returns Uint8Array.
    */
-  async function mergePdf(PDFLib, aheadBytes, completeBytes, replacements) {
+  async function mergePdf(PDFLib, aheadBytes, completeBytes, ops) {
     const { PDFDocument, PDFName } = PDFLib;
     const out = await PDFDocument.load(completeBytes, { ignoreEncryption: true, updateMetadata: false });
-    if (!replacements.length) return out.save();
+    if (!ops.length) return out.save();
     const src = await PDFDocument.load(aheadBytes, { ignoreEncryption: true, updateMetadata: false });
     // An annotation's optional /P points back at its page; copying it would
     // drag the source page (and through /Parent, the whole source document)
     // into the output as unused objects. Drop it on the pages we copy.
-    for (const r of replacements) {
-      const annots = src.getPage(r.aheadIdx).node.Annots();
+    for (const op of ops) {
+      const annots = src.getPage(op.aheadIdx).node.Annots();
       if (!annots) continue;
       for (let k = 0; k < annots.size(); k++) {
         const dict = annots.lookup(k);
         if (dict && dict.delete) dict.delete(PDFName.of('P'));
       }
     }
-    const copied = await out.copyPages(src, replacements.map((r) => r.aheadIdx));
-    replacements.forEach((r, k) => {
-      out.removePage(r.completeIdx);
-      out.insertPage(r.completeIdx, copied[k]);
-    });
+    const copied = await out.copyPages(src, ops.map((op) => op.aheadIdx));
+    // Last page first, so earlier complete indices stay valid.
+    const order = ops.map((op, k) => k).sort((x, y) => ops[y].completeIdx - ops[x].completeIdx);
+    for (const k of order) {
+      const { completeIdx, mode } = ops[k];
+      if (mode === 'insert') {
+        out.insertPage(completeIdx + 1, copied[k]);
+      } else {
+        out.removePage(completeIdx);
+        out.insertPage(completeIdx, copied[k]);
+      }
+    }
     return out.save();
   }
 
