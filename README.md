@@ -4,9 +4,11 @@ Bring the notes you wrote on the **(ahead)** slides into the **(complete)** slid
 
 Before class you get `Lecture (ahead).pdf`. After class you get `Lecture (complete).pdf`, which has extra slides (for example, answers to exercises). If you annotated the ahead version, this page builds a copy of the complete version with your annotated pages in it: in place of the matching clean pages, or right after them.
 
+**Use it online: <https://chatw.ch/keynote-pdf-branch-merger/>**, or download [`docs/index.html`](docs/index.html) and double-click it to use it offline.
+
 ## For students
 
-1. Double-click **`Keynote PDF Merger.html`**. It opens in your web browser (Chrome, Edge, Safari or Firefox). No installation, no internet needed; your files never leave your computer.
+1. Open **<https://chatw.ch/keynote-pdf-branch-merger/>**, or double-click a downloaded copy of `docs/index.html`. It works in Chrome, Edge, Safari or Firefox. Nothing is installed and your files never leave your computer: the page reads them inside your browser and uploads nothing.
 2. Drop both PDFs onto the page, or choose them with the two **Choose…** buttons. Use **⇄** if they ended up the wrong way round.
 3. Check the two columns: your (ahead) pages on the left, the (complete) pages on the right.
    - Click the round button between two pages to choose what happens:
@@ -26,12 +28,18 @@ Only annotations your PDF app saves as annotations (most apps' default: Preview,
 
 ## For maintainers
 
-The PDFs need to come from [keynote-pdf-brancher](../keynote-pdf-brancher). Its newer versions stamp each page with an invisible slide ID, which this page uses to pair pages exactly. Older PDFs are paired by content instead.
+The PDFs need to come from keynote-pdf-brancher, the lecturer's tool that exports a Keynote deck into the (ahead)/(complete) PDFs. Its newer versions stamp each page with an invisible slide ID, which this page uses to pair pages exactly. Older PDFs are paired by content instead.
 
 ```bash
 npm install
 npm test
-npm run build   # writes dist/Keynote PDF Merger.html, the file you hand out
+npm run build   # writes docs/index.html, the page GitHub Pages serves
 ```
 
 See `CLAUDE.md` for the design and its decisions.
+
+Found a problem? [Open an issue](https://github.com/chatchavan/keynote-pdf-branch-merger/issues).
+
+## License
+
+[MIT](LICENSE). Bundled libraries keep their own licenses: pdf.js (Apache-2.0), pdf-lib (MIT), Lucide icons (ISC).

@@ -1,8 +1,7 @@
 {
   "name": "keynote-pdf-branch-merger",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Merge the annotated pages of a Keynote (ahead) PDF into its (complete) PDF, in the browser",
   "scripts": {
     "test": "node --test tests/*.test.js",
     "fixtures": "uv run --with pymupdf scripts/make_fixtures.py",
@@ -11,11 +10,15 @@
   },
   "keywords": [],
   "author": "",
-  "license": "ISC",
+  "license": "MIT",
   "type": "commonjs",
   "devDependencies": {
     "lucide-static": "^1.51.0",
     "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^3.11.174"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/chatchavan/keynote-pdf-branch-merger.git"
   }
 }

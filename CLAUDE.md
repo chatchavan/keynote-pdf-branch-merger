@@ -9,7 +9,7 @@ A single-file web page for students: it takes the "(ahead)" and "(complete)" no-
 - `src/core.js`: all DOM-free logic, as a UMD-style file (`window.KPM` in the page, `module.exports` in Node). Covers stamp parsing, reading pages with pdf.js, stamp and similarity alignment, row building and grouping, merging with pdf-lib, and output naming. Library objects are passed in as arguments.
 - `src/app.js`: page wiring (drop zone, pickers, thumbnails, board, per-row action menu, download). Exposes `window.KPMApp` for debugging and automated checks.
 - `src/index.html`, `src/style.css`: the dev page. It opens straight from disk and loads `../vendor/*.js` with plain `<script>` tags.
-- `scripts/pack.mjs` (`npm run build`): inlines everything into `dist/Keynote PDF Merger.html`, the file handed to students. **The built file is committed**, so rebuild and commit it after any change to `src/` or `vendor/`.
+- `scripts/pack.mjs` (`npm run build`): inlines everything into `docs/index.html`, the page students use (online via GitHub Pages, or downloaded and double-clicked). **The built file is committed**, so rebuild and commit it after any change to `src/` or `vendor/`: pushing to `main` publishes it.
 - `vendor/`: byte-for-byte copies of `pdfjs-dist@3.11.174` (legacy build: `pdf.min.js`, `pdf.worker.min.js`) and `pdf-lib@1.17.1` (`pdf-lib.min.js`). Replace them wholesale from `node_modules`; never hand-edit.
 - `tests/core.test.js` (`npm test`): Node tests of `core.js` against the vendored libraries.
 - `scripts/make_fixtures.py` (`npm run fixtures`): regenerates `tests/fixtures/{stamped,unstamped,mismatched-deck}/Demo ({ahead,complete}).pdf`. These are synthetic, brancher-style PDFs carrying a student's annotations.
@@ -64,10 +64,15 @@ Only real annotation objects count (`page.getAnnotations()`), not counting `Link
   - Copy test PDFs into a git-ignored `.e2e/` folder to serve them, and delete it afterwards: they are course material.
 - The local static server sends no cache headers, so after `npm run build` reload with a new query string (`?v=N`), or the browser keeps the old build.
 
+## Publishing
+- Public repo <https://github.com/chatchavan/keynote-pdf-branch-merger> (MIT). The site is <https://chatw.ch/keynote-pdf-branch-merger/>: the user site's custom domain serves every `chatchavan/<repo>` Pages site.
+- Pages serves `docs/` from the `main` branch (branch-based, no GitHub Actions; decided). Pushing to `main` publishes.
+- The page links to the repo and its issues page (header of `src/index.html`), so students can report problems.
+
 ## Common Commands
 ```bash
 npm install          # dev deps only (pdfjs-dist, pdf-lib), used to refresh vendor/ and run tests
 npm test
-npm run build        # -> dist/Keynote PDF Merger.html
+npm run build        # -> docs/index.html
 npm run fixtures     # regenerate tests/fixtures (uv + pymupdf)
 ```

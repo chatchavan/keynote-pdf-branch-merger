@@ -1,5 +1,5 @@
 // Inline src/index.html's stylesheet and scripts into one double-clickable
-// file: dist/Keynote PDF Merger.html. The pdf.js worker goes in as a
+// file: docs/index.html (served by GitHub Pages, also double-clickable). The pdf.js worker goes in as a
 // text/plain block that app.js turns into a Blob-URL Worker.
 // Run: npm run build
 import fs from 'node:fs';
@@ -8,8 +8,8 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const src = path.join(root, 'src');
-const outDir = path.join(root, 'dist');
-const outFile = path.join(outDir, 'Keynote PDF Merger.html');
+const outDir = path.join(root, 'docs');
+const outFile = path.join(outDir, 'index.html');
 
 const read = (rel) => fs.readFileSync(path.join(src, rel), 'utf8');
 const safe = (code, file) => {
