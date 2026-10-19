@@ -1,0 +1,428 @@
+/* Keynote PDF Branch Merger: page wiring. Logic lives in core.js (window.KPM). */
+(function () {
+  'use strict';
+
+  const THUMB_CSS_WIDTH = 480;  // render width; the cell scales it down to fit
+  const VEC_W = 32;
+  const VEC_H = 18;
+
+  const $ = (sel) => document.querySelector(sel);
+
+  // pdf.js continues long page renders in animation frames, which browsers
+  // stop delivering to background tabs and hidden or covered windows, so
+  // reading a deck would stall there. This page animates nothing itself, so
+  // a timer-based stand-in is safe and keeps the work going.
+  window.requestAnimationFrame = (cb) => setTimeout(() => cb(performance.now()), 0);
+  window.cancelAnimationFrame = (id) => clearTimeout(id);
+  const state = {
+    files: { ahead: null, complete: null },
+    run: 0,          // bumps on every new load so stale async work is dropped
+    rows: [],
+    pages: null,     // {ahead: {infos, canvases, bytes}, complete: {...}}
+    expanded: new Set(),
+    pdfWorker: null,
+  };
+
+  // ---------- pdf.js worker ----------
+  // In the packed single file the worker source sits in a text/plain script
+  // tag. Try a real Worker from a Blob URL; where the browser refuses that
+  // (some file:// setups), run the worker code on the main thread instead.
+  // The unpacked dev page always uses the main-thread fallback.
+  // One PDFWorker is shared by every document and passed in explicitly:
+  // pdf.js then never tears it down when a document is destroyed.
+  let workerReady = null;
+  function setupWorker() {
+    if (workerReady) return workerReady;
+    workerReady = (async () => {
+      const inline = document.getElementById('pdfjs-worker-src');
+      let url = null;
+      if (inline) {
+        url = URL.createObjectURL(new Blob([inline.textContent], { type: 'text/javascript' }));
+        const worker = await tryWorker(url);
+        if (worker) {
+          state.pdfWorker = new pdfjsLib.PDFWorker({ port: worker });
+          return 'worker';
+        }
+      }
+      await loadScript(url || '../vendor/pdf.worker.min.js');
+      state.pdfWorker = new pdfjsLib.PDFWorker();
+      return 'main-thread';
+    })();
+    return workerReady;
+  }
+
+  function tryWorker(url) {
+    return new Promise((resolve) => {
+      let w;
+      try { w = new Worker(url); } catch (e) { resolve(null); return; }
+      const timer = setTimeout(() => { w.terminate(); resolve(null); }, 4000);
+      w.addEventListener('message', () => { clearTimeout(timer); resolve(w); }, { once: true });
+      w.addEventListener('error', () => { clearTimeout(timer); w.terminate(); resolve(null); }, { once: true });
+    });
+  }
+
+  function loadScript(src) {
+    return new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = src;
+      s.onload = resolve;
+      s.onerror = () => reject(new Error('could not load ' + src));
+      document.head.appendChild(s);
+    });
+  }
+
+  // ---------- file input ----------
+  function assign(role, file) {
+    state.files[role] = file;
+    const slot = document.querySelector(`.slot[data-role="${role}"]`);
+    slot.classList.toggle('filled', !!file);
+    $(`[data-file="${role}"]`).textContent = file ? file.name : 'No file chosen';
+    maybeProcess();
+  }
+
+  function assignDropped(files) {
+    const pdfs = [...files].filter((f) => /\.pdf$/i.test(f.name) || f.type === 'application/pdf');
+    if (!pdfs.length) return;
+    // Place by "(ahead)"/"(complete)" in the name; anything else fills a slot
+    // this drop left free, preferring one that is still empty.
+    const placed = {};
+    const unplaced = [];
+    for (const f of pdfs.slice(0, 2)) {
+      const role = KPM.guessRole(f.name);
+      if (role && !placed[role]) placed[role] = f; else unplaced.push(f);
+    }
+    for (const f of unplaced) {
+      const free = ['ahead', 'complete'].filter((r) => !placed[r]);
+      placed[free.find((r) => !state.files[r]) || free[0]] = f;
+    }
+    Object.assign(state.files, placed);
+    assign('ahead', state.files.ahead);
+    assign('complete', state.files.complete);
+  }
+
+  function wireInputs() {
+    const dz = $('#dropzone');
+    ['dragenter', 'dragover'].forEach((t) => dz.addEventListener(t, (e) => {
+      e.preventDefault();
+      dz.classList.add('over');
+    }));
+    ['dragleave', 'drop'].forEach((t) => dz.addEventListener(t, () => dz.classList.remove('over')));
+    dz.addEventListener('drop', (e) => {
+      e.preventDefault();
+      assignDropped(e.dataTransfer.files);
+    });
+    // A file dropped anywhere else must not make the browser navigate away.
+    window.addEventListener('dragover', (e) => e.preventDefault());
+    window.addEventListener('drop', (e) => e.preventDefault());
+
+    document.querySelectorAll('input[type=file][data-input]').forEach((input) => {
+      input.addEventListener('change', () => {
+        if (input.files[0]) assign(input.dataset.input, input.files[0]);
+        input.value = '';
+      });
+    });
+    $('#swap').addEventListener('click', () => {
+      const { ahead, complete } = state.files;
+      state.files = { ahead: complete, complete: ahead };
+      assign('ahead', state.files.ahead);
+      assign('complete', state.files.complete);
+    });
+    $('#download').addEventListener('click', download);
+  }
+
+  // ---------- status ----------
+  function clearMessages() { $('#messages').innerHTML = ''; }
+  function message(text, kind) {
+    $('#status').hidden = false;
+    const li = document.createElement('li');
+    if (kind) li.className = kind;
+    li.textContent = text;
+    $('#messages').appendChild(li);
+  }
+  function progress(label, done, total) {
+    const p = $('#progress');
+    $('#status').hidden = false;
+    p.hidden = label === null;
+    if (label === null) return;
+    p.querySelector('.label').textContent = label;
+    p.querySelector('.bar').style.width = total ? `${(100 * done) / total}%` : '0';
+  }
+
+  // ---------- processing ----------
+  async function maybeProcess() {
+    const run = ++state.run;
+    state.rows = [];
+    state.pages = null;
+    $('#board').hidden = true;
+    $('#actionbar').hidden = true;
+    clearMessages();
+    progress(null);
+    const { ahead, complete } = state.files;
+    if (!ahead || !complete) return;
+    if (ahead === complete) {
+      message('The same file is chosen twice. Choose one (ahead) and one (complete) file.', 'error');
+      return;
+    }
+    try {
+      await setupWorker();
+      const a = await loadSide(ahead, 'ahead', run);
+      const c = await loadSide(complete, 'complete', run);
+      if (run !== state.run) return;
+      progress(null);
+      align(a, c);
+    } catch (e) {
+      if (run !== state.run) return;
+      progress(null);
+      console.error(e);
+      message(`Could not read the PDFs: ${e.message || e}`, 'error');
+    }
+  }
+
+  async function loadSide(file, role, run) {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    // pdf.js takes ownership of the buffer it is given; keep our own copy for pdf-lib.
+    const doc = await pdfjsLib.getDocument({ data: bytes.slice(), worker: state.pdfWorker, isEvalSupported: false, verbosity: 0 }).promise;
+    const infos = [];
+    const canvases = [];
+    try {
+      for (let i = 0; i < doc.numPages; i++) {
+        if (run !== state.run) throw new Error('cancelled');
+        progress(`Reading ${role} – page ${i + 1} of ${doc.numPages}`, i, doc.numPages);
+        const info = await KPM.readPageInfo(doc, i);
+        const canvas = await renderThumb(doc, i);
+        info.thumbVec = thumbVector(canvas);
+        infos.push(info);
+        canvases.push(canvas);
+      }
+    } finally {
+      await doc.destroy();
+    }
+    return { infos, canvases, bytes, name: file.name };
+  }
+
+  async function renderThumb(doc, index) {
+    const page = await doc.getPage(index + 1);
+    const base = page.getViewport({ scale: 1 });
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const viewport = page.getViewport({ scale: (THUMB_CSS_WIDTH / base.width) * dpr });
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(viewport.width);
+    canvas.height = Math.round(viewport.height);
+    await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+    page.cleanup();
+    return canvas;
+  }
+
+  function thumbVector(canvas) {
+    const small = document.createElement('canvas');
+    small.width = VEC_W;
+    small.height = VEC_H;
+    const ctx = small.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(canvas, 0, 0, VEC_W, VEC_H);
+    const px = ctx.getImageData(0, 0, VEC_W, VEC_H).data;
+    const vec = new Array(VEC_W * VEC_H);
+    for (let i = 0; i < vec.length; i++) {
+      vec[i] = 0.299 * px[4 * i] + 0.587 * px[4 * i + 1] + 0.114 * px[4 * i + 2];
+    }
+    return vec;
+  }
+
+  function align(a, c) {
+    let mapping;
+    let scores = null;
+    const byStamp = KPM.alignByStamps(a.infos, c.infos);
+    if (byStamp.mapping) {
+      mapping = byStamp.mapping;
+    } else {
+      if (a.infos.length > c.infos.length) {
+        message('Your (ahead) file has more pages than the (complete) file. Did you put them the wrong way round? Use ⇄ to swap them.', 'error');
+        return;
+      }
+      ({ mapping, scores } = KPM.alignBySimilarity(a.infos, c.infos));
+      const why = {
+        missing: 'These PDFs carry no slide IDs (they were made before the IDs were added).',
+        partial: 'Only some pages carry slide IDs.',
+        'different-export': 'The two files come from different exports of the slides, so their slide IDs do not match.',
+        'not-subset': 'The slide IDs of the two files do not line up.',
+      }[byStamp.reason];
+      message(`${why} Pages were matched by their content instead. Check the pairs marked “?”.`, 'warn');
+    }
+    state.pages = { ahead: a, complete: c };
+    state.rows = KPM.buildRows(a.infos, c.infos, mapping, scores);
+    state.expanded = new Set();
+    const annotated = state.rows.filter((r) => r.aheadAnnotated).length;
+    if (!annotated) {
+      message('No annotations were found in your (ahead) file. Ink that an app has “flattened” into the page cannot be detected: open the slides below and pick pages by hand.', 'warn');
+    }
+    $('#outname').value = KPM.defaultOutputName(c.name);
+    renderBoard();
+    $('#board').hidden = false;
+    $('#actionbar').hidden = false;
+    updateSummary();
+  }
+
+  // ---------- board ----------
+  function label(role, info) {
+    return info.stamp ? `Slide ${info.stamp.slide}` : `${role === 'ahead' ? 'Ahead' : 'Complete'} p. ${info.index + 1}`;
+  }
+
+  function thumbCell(role, idx, row) {
+    const cell = document.createElement('div');
+    cell.className = 'thumb';
+    if (idx === null) {
+      cell.innerHTML = '<div class="placeholder"><span>Not in your (ahead) file</span></div>';
+      return cell;
+    }
+    const side = state.pages[role];
+    const info = side.infos[idx];
+    cell.appendChild(side.canvases[idx]);
+    const tag = document.createElement('span');
+    tag.className = 'tag';
+    tag.textContent = label(role, info);
+    cell.appendChild(tag);
+    if (info.annotCount) {
+      const badge = document.createElement('span');
+      badge.className = 'badge';
+      badge.textContent = `✎ ${info.annotCount}`;
+      badge.title = `${info.annotCount} annotation(s): ${info.annotTypes.join(', ')}`;
+      cell.appendChild(badge);
+    }
+    if (role === 'complete') {
+      const rep = document.createElement('div');
+      rep.className = 'replaced-label';
+      rep.innerHTML = '<span>replaced by your (ahead) page</span>';
+      cell.appendChild(rep);
+    }
+    return cell;
+  }
+
+  function rowElement(row) {
+    const el = document.createElement('div');
+    el.className = 'row';
+    el.appendChild(thumbCell('ahead', row.aheadIdx, row));
+    if (row.aheadIdx === null) {
+      const none = document.createElement('span');
+      none.className = 'no-toggle';
+      none.textContent = '–';
+      el.appendChild(none);
+    } else {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'toggle';
+      btn.innerHTML = '→' + (row.uncertain ? '<span class="q">?</span>' : '');
+      btn.addEventListener('click', () => {
+        row.useAhead = !row.useAhead;
+        updateRow(el, row);
+        updateSummary();
+      });
+      el.appendChild(btn);
+    }
+    el.appendChild(thumbCell('complete', row.completeIdx, row));
+    const warn = document.createElement('div');
+    warn.className = 'row-warning';
+    el.appendChild(warn);
+    updateRow(el, row);
+    return el;
+  }
+
+  function updateRow(el, row) {
+    const btn = el.querySelector('.toggle');
+    const completeCell = el.children[2];
+    const repLabel = completeCell.querySelector('.replaced-label');
+    if (btn) {
+      btn.setAttribute('aria-pressed', String(row.useAhead));
+      btn.title = (row.useAhead ? 'Using your (ahead) page. Click to keep the (complete) page.'
+        : 'Keeping the (complete) page. Click to use your (ahead) page instead.')
+        + (row.uncertain ? ' These two pages were matched by content: check that they are the same slide.' : '');
+    }
+    completeCell.classList.toggle('replaced', row.useAhead);
+    if (repLabel) repLabel.hidden = !row.useAhead;
+    const warn = el.querySelector('.row-warning');
+    const lose = row.useAhead && row.completeAnnotated;
+    warn.hidden = !lose;
+    warn.textContent = lose ? '⚠ This (complete) page has annotations of its own. They will be lost if you use the (ahead) page.' : '';
+  }
+
+  function runLabel(rows, open) {
+    const first = rows[0];
+    const last = rows[rows.length - 1];
+    const name = (r) => (r.slide !== null ? r.slide : `p. ${r.completeIdx + 1}`);
+    const span = rows.length === 1 ? `slide ${name(first)}` : `slides ${name(first)}–${name(last)}`;
+    const n = rows.length === 1 ? '1 slide' : `${rows.length} slides`;
+    return `${open ? '▾' : '▸'} ${n} without annotations (${span})`;
+  }
+
+  function renderBoard() {
+    const host = $('#rows');
+    host.innerHTML = '';
+    for (const g of KPM.groupRows(state.rows)) {
+      if (g.type === 'row') {
+        host.appendChild(rowElement(g.row));
+        continue;
+      }
+      const key = g.rows[0].completeIdx;
+      const open = state.expanded.has(key);
+      const bar = document.createElement('button');
+      bar.type = 'button';
+      bar.className = 'run';
+      bar.textContent = runLabel(g.rows, open);
+      bar.setAttribute('aria-expanded', String(open));
+      bar.addEventListener('click', () => {
+        if (open) state.expanded.delete(key); else state.expanded.add(key);
+        const y = bar.getBoundingClientRect().top;
+        renderBoard();
+        // Keep the clicked bar where it was on screen.
+        const again = [...document.querySelectorAll('.run')].find((b) => b.dataset.key === String(key));
+        if (again) window.scrollBy(0, again.getBoundingClientRect().top - y);
+      });
+      bar.dataset.key = String(key);
+      host.appendChild(bar);
+      if (open) {
+        const body = document.createElement('div');
+        body.className = 'run-body';
+        g.rows.forEach((r) => body.appendChild(rowElement(r)));
+        host.appendChild(body);
+      }
+    }
+  }
+
+  function chosen() {
+    return state.rows.filter((r) => r.useAhead && r.aheadIdx !== null)
+      .map((r) => ({ aheadIdx: r.aheadIdx, completeIdx: r.completeIdx }));
+  }
+
+  function updateSummary() {
+    const n = chosen().length;
+    $('#summary').textContent = n === 0 ? 'No pages chosen from (ahead) yet.'
+      : `${n} page${n === 1 ? '' : 's'} will come from your (ahead) file.`;
+    $('#download').disabled = n === 0;
+  }
+
+  // ---------- output ----------
+  async function download() {
+    const btn = $('#download');
+    btn.disabled = true;
+    try {
+      const bytes = await KPM.mergePdf(PDFLib, state.pages.ahead.bytes, state.pages.complete.bytes, chosen());
+      let name = $('#outname').value.trim() || KPM.defaultOutputName(state.pages.complete.name);
+      if (!/\.pdf$/i.test(name)) name += '.pdf';
+      const url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (e) {
+      console.error(e);
+      message(`Could not build the merged PDF: ${e.message || e}`, 'error');
+    } finally {
+      updateSummary();
+    }
+  }
+
+  wireInputs();
+  // Exposed for debugging and for automated checks of the page.
+  window.KPMApp = { state, assign, setupWorker };
+})();

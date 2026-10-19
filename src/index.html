@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Keynote PDF Merger</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <h1>Keynote PDF Merger</h1>
+  <p class="lede">Bring the notes you wrote on the <b>(ahead)</b> slides into the <b>(complete)</b> slides.
+    Everything happens on your computer; your files are not uploaded anywhere.</p>
+</header>
+
+<main>
+  <section id="inputs" class="inputs">
+    <div id="dropzone" class="dropzone" tabindex="0">
+      <p class="drop-hint">Drop both PDFs here</p>
+      <div class="slots">
+        <label class="slot" data-role="ahead">
+          <span class="slot-title">(ahead)</span>
+          <span class="slot-sub">the version you annotated before class</span>
+          <span class="slot-file" data-file="ahead">No file chosen</span>
+          <input type="file" accept="application/pdf,.pdf" data-input="ahead">
+          <span class="button small">Choose…</span>
+        </label>
+        <button type="button" id="swap" class="swap" title="Swap the two files" aria-label="Swap the two files">⇄</button>
+        <label class="slot" data-role="complete">
+          <span class="slot-title">(complete)</span>
+          <span class="slot-sub">the full version released after class</span>
+          <span class="slot-file" data-file="complete">No file chosen</span>
+          <input type="file" accept="application/pdf,.pdf" data-input="complete">
+          <span class="button small">Choose…</span>
+        </label>
+      </div>
+    </div>
+  </section>
+
+  <section id="status" class="status" hidden>
+    <div id="progress" class="progress" hidden><div class="bar"></div><span class="label"></span></div>
+    <ul id="messages" class="messages"></ul>
+  </section>
+
+  <section id="board" class="board" hidden>
+    <div class="board-head">
+      <div>Your (ahead)</div>
+      <div class="mid">Use?</div>
+      <div>(complete)</div>
+    </div>
+    <div id="rows"></div>
+  </section>
+</main>
+
+<footer id="actionbar" class="actionbar" hidden>
+  <span id="summary" class="summary"></span>
+  <label class="outname">Save as
+    <input id="outname" type="text" spellcheck="false">
+  </label>
+  <button type="button" id="download" class="button primary">Download merged PDF</button>
+</footer>
+
+<script src="../vendor/pdf.min.js"></script>
+<script src="../vendor/pdf-lib.min.js"></script>
+<script src="core.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
