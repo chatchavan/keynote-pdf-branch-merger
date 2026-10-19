@@ -24,49 +24,60 @@
   };
 
   // ---------- pdf.js worker ----------
-  // In the packed single file the worker source sits in a text/plain script
-  // tag. Try a real Worker from a Blob URL; where the browser refuses that
-  // (some file:// setups), run the worker code on the main thread instead.
-  // The unpacked dev page always uses the main-thread fallback.
-  // One PDFWorker is shared by every document and passed in explicitly:
-  // pdf.js then never tears it down when a document is destroyed.
+  // pdf.js 6 ships as ES modules only. The packed single file inlines the
+  // library as a module script, and the worker source, rewritten by
+  // scripts/pack.mjs into a classic script, in a text/plain block. The dev
+  // page loads both from vendor/ as modules (over http only). Module scripts
+  // run after the classic ones, so wait for the library before first use.
+  // Try a real Worker; where the browser refuses it, run the worker code on
+  // the main thread: it sets globalThis.pdfjsWorker, which pdf.js then uses
+  // as a "fake worker". One PDFWorker is shared by every document and passed
+  // in explicitly: pdf.js then never tears it down when a document is destroyed.
+  const pdfjsReady = new Promise((resolve) => {
+    if (window.pdfjsLib) resolve();
+    else window.addEventListener('pdfjs-ready', resolve, { once: true });
+  });
+
   let workerReady = null;
   function setupWorker() {
     if (workerReady) return workerReady;
     workerReady = (async () => {
+      await pdfjsReady;
       const inline = document.getElementById('pdfjs-worker-src');
-      let url = null;
-      if (inline) {
-        url = URL.createObjectURL(new Blob([inline.textContent], { type: 'text/javascript' }));
-        const worker = await tryWorker(url);
-        if (worker) {
-          state.pdfWorker = new pdfjsLib.PDFWorker({ port: worker });
-          return 'worker';
-        }
+      const url = inline
+        ? URL.createObjectURL(new Blob([inline.textContent], { type: 'text/javascript' }))
+        : new URL('../vendor/pdf.worker.min.mjs', location.href).href;
+      const type = inline ? 'classic' : 'module';
+      const worker = await tryWorker(url, type);
+      if (worker) {
+        state.pdfWorker = new pdfjsLib.PDFWorker({ port: worker });
+        return 'worker';
       }
-      await loadScript(url || '../vendor/pdf.worker.min.js');
+      await runOnMainThread(url, type);
       state.pdfWorker = new pdfjsLib.PDFWorker();
       return 'main-thread';
     })();
     return workerReady;
   }
 
-  function tryWorker(url) {
+  function tryWorker(url, type) {
     return new Promise((resolve) => {
       let w;
-      try { w = new Worker(url); } catch (e) { resolve(null); return; }
+      try { w = new Worker(url, { type }); } catch (e) { resolve(null); return; }
       const timer = setTimeout(() => { w.terminate(); resolve(null); }, 4000);
       w.addEventListener('message', () => { clearTimeout(timer); resolve(w); }, { once: true });
       w.addEventListener('error', () => { clearTimeout(timer); w.terminate(); resolve(null); }, { once: true });
     });
   }
 
-  function loadScript(src) {
+  /* Run the worker code in the page; resolves once it set globalThis.pdfjsWorker. */
+  function runOnMainThread(src, type) {
     return new Promise((resolve, reject) => {
       const s = document.createElement('script');
+      if (type === 'module') s.type = 'module';
       s.src = src;
-      s.onload = resolve;
-      s.onerror = () => reject(new Error('could not load ' + src));
+      s.onload = () => (globalThis.pdfjsWorker ? resolve() : reject(new Error('could not start the PDF reader')));
+      s.onerror = () => reject(new Error('could not load the PDF reader'));
       document.head.appendChild(s);
     });
   }
@@ -181,7 +192,9 @@
   async function loadSide(file, role, run) {
     const bytes = new Uint8Array(await file.arrayBuffer());
     // pdf.js takes ownership of the buffer it is given; keep our own copy for pdf-lib.
-    const doc = await pdfjsLib.getDocument({ data: bytes.slice(), worker: state.pdfWorker, isEvalSupported: false, verbosity: 0 }).promise;
+    // pdf.js 6: a document is closed through its loading task.
+    const task = pdfjsLib.getDocument({ data: bytes.slice(), worker: state.pdfWorker, verbosity: 0 });
+    const doc = await task.promise;
     const infos = [];
     const canvases = [];
     try {
@@ -195,7 +208,7 @@
         canvases.push(canvas);
       }
     } finally {
-      await doc.destroy();
+      await task.destroy();
     }
     return { infos, canvases, bytes, name: file.name };
   }
@@ -208,7 +221,7 @@
     const canvas = document.createElement('canvas');
     canvas.width = Math.round(viewport.width);
     canvas.height = Math.round(viewport.height);
-    await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+    await page.render({ canvas, viewport }).promise;
     page.cleanup();
     return canvas;
   }

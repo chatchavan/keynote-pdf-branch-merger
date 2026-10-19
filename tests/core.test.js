@@ -4,17 +4,22 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const pdfjsLib = require('../vendor/pdf.min.js');
+const { pathToFileURL } = require('node:url');
 const PDFLib = require('../vendor/pdf-lib.min.js');
 const KPM = require('../src/core.js');
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = path.join(__dirname, '..', 'vendor', 'pdf.worker.min.js');
+// pdf.js 6 is ES-module only; load it once before the tests run.
+let pdfjsLib;
+test.before(async () => {
+  pdfjsLib = await import(pathToFileURL(path.join(__dirname, '..', 'vendor', 'pdf.min.mjs')).href);
+  pdfjsLib.GlobalWorkerOptions.workerSrc = pathToFileURL(path.join(__dirname, '..', 'vendor', 'pdf.worker.min.mjs')).href;
+});
 
 const FIX = path.join(__dirname, 'fixtures');
 const read = (set, role) => new Uint8Array(fs.readFileSync(path.join(FIX, set, `Demo (${role}).pdf`)));
 
 async function open(bytes) {
-  return pdfjsLib.getDocument({ data: bytes.slice(), isEvalSupported: false, verbosity: 0 }).promise;
+  return pdfjsLib.getDocument({ data: bytes.slice(), verbosity: 0 }).promise;
 }
 
 async function infos(set) {
