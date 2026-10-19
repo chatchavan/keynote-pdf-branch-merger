@@ -1,0 +1,261 @@
+/*
+ * Keynote PDF Branch Merger: DOM-free core logic.
+ *
+ * Loaded by the page with a plain <script> (sets window.KPM) and by the Node
+ * tests with require() (module.exports). Everything that touches pdf.js or
+ * pdf-lib takes the library object as an argument, so the same code runs
+ * against the vendored copies in both places.
+ */
+(function (root, factory) {
+  const api = factory();
+  if (typeof module === 'object' && module.exports) module.exports = api;
+  else root.KPM = api;
+})(typeof self !== 'undefined' ? self : this, function () {
+  'use strict';
+
+  // Invisible per-page stamp written by keynote-pdf-brancher
+  // (export_keynote.stamp_slide_ids): KPB1|<deck-id>|<slide>|<total>
+  const STAMP_RE = /KPB1\|([0-9a-f]{12})\|(\d+)\|(\d+)/;
+
+  // Annotation subtypes that are not a student's markup: hyperlinks Keynote
+  // exports itself, form fields, and popups (counted through their parent).
+  const IGNORED_SUBTYPES = new Set(['Link', 'Widget', 'Popup']);
+
+  // Below this similarity a visually matched pair is flagged as uncertain.
+  const UNCERTAIN_BELOW = 0.5;
+
+  function parseStamp(text) {
+    const m = STAMP_RE.exec(text || '');
+    if (!m) return null;
+    return { deck: m[1], slide: Number(m[2]), total: Number(m[3]) };
+  }
+
+  function isStudentAnnotation(annot) {
+    return !!annot && !IGNORED_SUBTYPES.has(annot.subtype);
+  }
+
+  function tokenize(text) {
+    return (text || '')
+      .replace(STAMP_RE, ' ')
+      .toLowerCase()
+      .split(/[^\p{L}\p{N}]+/u)
+      .filter(Boolean);
+  }
+
+  /* Per-page facts read with pdf.js: stamp, words, student annotations. */
+  async function readPageInfo(pdfDoc, index) {
+    const page = await pdfDoc.getPage(index + 1);
+    const content = await page.getTextContent();
+    const text = content.items.map((it) => it.str).join(' ');
+    // A stamp may be split across text items; also try without separators.
+    const stamp = parseStamp(text) || parseStamp(content.items.map((it) => it.str).join(''));
+    const annots = (await page.getAnnotations({ intent: 'display' })).filter(isStudentAnnotation);
+    return {
+      index,
+      stamp,
+      words: tokenize(text),
+      annotCount: annots.length,
+      annotTypes: [...new Set(annots.map((a) => a.subtype))],
+    };
+  }
+
+  async function readAllPageInfo(pdfDoc, onProgress) {
+    const infos = [];
+    for (let i = 0; i < pdfDoc.numPages; i++) {
+      infos.push(await readPageInfo(pdfDoc, i));
+      if (onProgress) onProgress(i + 1, pdfDoc.numPages);
+    }
+    return infos;
+  }
+
+  /*
+   * Map by stamps. Returns {mapping: aheadIdx -> completeIdx (array)} or
+   * {mapping: null, reason} when stamps are missing, from different exports,
+   * or inconsistent; the caller then falls back to similarity matching.
+   */
+  function alignByStamps(ahead, complete) {
+    const all = ahead.concat(complete);
+    if (all.some((p) => !p.stamp)) {
+      return { mapping: null, reason: all.some((p) => p.stamp) ? 'partial' : 'missing' };
+    }
+    const decks = new Set(all.map((p) => p.stamp.deck));
+    if (decks.size > 1) return { mapping: null, reason: 'different-export' };
+    const bySlide = new Map(complete.map((p) => [p.stamp.slide, p.index]));
+    const mapping = ahead.map((p) => bySlide.get(p.stamp.slide));
+    if (mapping.some((j) => j === undefined)) return { mapping: null, reason: 'not-subset' };
+    for (let k = 1; k < mapping.length; k++) {
+      if (mapping[k] <= mapping[k - 1]) return { mapping: null, reason: 'not-subset' };
+    }
+    return { mapping, reason: null };
+  }
+
+  function textSimilarity(a, b) {
+    if (!a.length && !b.length) return null;
+    const ca = new Map();
+    for (const w of a) ca.set(w, (ca.get(w) || 0) + 1);
+    let inter = 0;
+    const cb = new Map();
+    for (const w of b) cb.set(w, (cb.get(w) || 0) + 1);
+    for (const [w, n] of ca) inter += Math.min(n, cb.get(w) || 0);
+    return inter / (a.length + b.length - inter);
+  }
+
+  /* Grayscale thumbnail vectors (values 0..255, same length). */
+  function imageSimilarity(va, vb) {
+    if (!va || !vb || va.length !== vb.length || !va.length) return null;
+    let diff = 0;
+    for (let i = 0; i < va.length; i++) diff += Math.abs(va[i] - vb[i]);
+    return 1 - diff / (255 * va.length);
+  }
+
+  function pageSimilarity(a, b) {
+    const t = textSimilarity(a.words, b.words);
+    const v = imageSimilarity(a.thumbVec, b.thumbVec);
+    if (t === null && v === null) return 0;
+    if (t === null) return v;
+    if (v === null) return t;
+    // Text is the stronger signal (annotations don't change it), the picture
+    // separates text-less slides and build steps with identical words.
+    return 0.75 * t + 0.25 * v;
+  }
+
+  /*
+   * Order-preserving alignment of every ahead page onto a distinct complete
+   * page, maximising total similarity ((ahead) is an in-order subset of
+   * (complete)). Returns {mapping, scores}.
+   */
+  function alignBySimilarity(ahead, complete) {
+    const n = ahead.length;
+    const m = complete.length;
+    if (n > m) throw new Error('ahead-longer');
+    const sim = ahead.map((a) => complete.map((c) => pageSimilarity(a, c)));
+    const NEG = -Infinity;
+    // dp[i][j]: best score placing the first i ahead pages within the first j complete pages.
+    const dp = Array.from({ length: n + 1 }, () => new Float64Array(m + 1).fill(NEG));
+    for (let j = 0; j <= m; j++) dp[0][j] = 0;
+    for (let i = 1; i <= n; i++) {
+      for (let j = i; j <= m; j++) {
+        dp[i][j] = Math.max(dp[i][j - 1], dp[i - 1][j - 1] + sim[i - 1][j - 1]);
+      }
+    }
+    const mapping = new Array(n);
+    let j = m;
+    for (let i = n; i >= 1; i--) {
+      while (j > i && dp[i][j] === dp[i][j - 1]) j--;
+      mapping[i - 1] = j - 1;
+      j--;
+    }
+    return { mapping, scores: mapping.map((cj, i) => sim[i][cj]) };
+  }
+
+  /*
+   * One row per (complete) page, in order. ahead: page index or null.
+   * uncertain: the pair was matched visually with a low score.
+   */
+  function buildRows(ahead, complete, mapping, scores) {
+    const aheadFor = new Map(mapping.map((cj, ai) => [cj, ai]));
+    return complete.map((c, cj) => {
+      const ai = aheadFor.has(cj) ? aheadFor.get(cj) : null;
+      const a = ai === null ? null : ahead[ai];
+      const score = scores && ai !== null ? scores[ai] : null;
+      return {
+        completeIdx: cj,
+        aheadIdx: ai,
+        aheadAnnotated: !!(a && a.annotCount),
+        completeAnnotated: c.annotCount > 0,
+        uncertain: score !== null && score < UNCERTAIN_BELOW,
+        slide: c.stamp ? c.stamp.slide : null,
+        useAhead: !!(a && a.annotCount),
+      };
+    });
+  }
+
+  /*
+   * Split rows into what the UI shows: rows whose ahead page has annotations,
+   * plus the row before and after each, stay expanded; every other run of
+   * rows becomes one collapsed group. Returns [{type:'row', row} | {type:'run', rows}].
+   */
+  function groupRows(rows) {
+    const keep = rows.map(() => false);
+    rows.forEach((r, i) => {
+      if (!r.aheadAnnotated) return;
+      for (const k of [i - 1, i, i + 1]) if (k >= 0 && k < rows.length) keep[k] = true;
+    });
+    const out = [];
+    let run = [];
+    rows.forEach((r, i) => {
+      if (keep[i]) {
+        if (run.length) out.push({ type: 'run', rows: run });
+        run = [];
+        out.push({ type: 'row', row: r });
+      } else {
+        run.push(r);
+      }
+    });
+    if (run.length) out.push({ type: 'run', rows: run });
+    return out;
+  }
+
+  /*
+   * Replace pages of (complete) with pages of (ahead).
+   * replacements: [{aheadIdx, completeIdx}]. Returns Uint8Array.
+   */
+  async function mergePdf(PDFLib, aheadBytes, completeBytes, replacements) {
+    const { PDFDocument, PDFName } = PDFLib;
+    const out = await PDFDocument.load(completeBytes, { ignoreEncryption: true, updateMetadata: false });
+    if (!replacements.length) return out.save();
+    const src = await PDFDocument.load(aheadBytes, { ignoreEncryption: true, updateMetadata: false });
+    // An annotation's optional /P points back at its page; copying it would
+    // drag the source page (and through /Parent, the whole source document)
+    // into the output as unused objects. Drop it on the pages we copy.
+    for (const r of replacements) {
+      const annots = src.getPage(r.aheadIdx).node.Annots();
+      if (!annots) continue;
+      for (let k = 0; k < annots.size(); k++) {
+        const dict = annots.lookup(k);
+        if (dict && dict.delete) dict.delete(PDFName.of('P'));
+      }
+    }
+    const copied = await out.copyPages(src, replacements.map((r) => r.aheadIdx));
+    replacements.forEach((r, k) => {
+      out.removePage(r.completeIdx);
+      out.insertPage(r.completeIdx, copied[k]);
+    });
+    return out.save();
+  }
+
+  /* "Lecture 3 (complete).pdf" -> "Lecture 3 (complete + merged).pdf" */
+  function defaultOutputName(completeName) {
+    const base = (completeName || 'slides.pdf').replace(/\.pdf$/i, '');
+    const m = /^(.*)\(complete\)\s*$/i.exec(base);
+    const stem = m ? m[1].replace(/\s+$/, '') : base;
+    return `${stem} (complete + merged).pdf`;
+  }
+
+  /* Which role a dropped file probably is, from its name. */
+  function guessRole(name) {
+    if (/\(ahead\)/i.test(name)) return 'ahead';
+    if (/\(complete\)/i.test(name)) return 'complete';
+    return null;
+  }
+
+  return {
+    STAMP_RE,
+    UNCERTAIN_BELOW,
+    parseStamp,
+    isStudentAnnotation,
+    tokenize,
+    readPageInfo,
+    readAllPageInfo,
+    alignByStamps,
+    textSimilarity,
+    imageSimilarity,
+    pageSimilarity,
+    alignBySimilarity,
+    buildRows,
+    groupRows,
+    mergePdf,
+    defaultOutputName,
+    guessRole,
+  };
+});
