@@ -21,6 +21,7 @@
     pages: null,     // {ahead: {infos, canvases, bytes}, complete: {...}}
     expanded: new Set(),
     pdfWorker: null,
+    matchedByStamp: false,
   };
 
   // ---------- pdf.js worker ----------
@@ -229,7 +230,7 @@
 
   function align(a, c) {
     let mapping;
-    let scores = null;
+    let match = null;
     const byStamp = KPM.alignByStamps(a.infos, c.infos);
     if (byStamp.mapping) {
       mapping = byStamp.mapping;
@@ -238,18 +239,27 @@
         message('Your (ahead) file has more pages than the (complete) file. Did you put them the wrong way round? Use ⇄ to swap them.', 'error');
         return;
       }
-      ({ mapping, scores } = KPM.alignBySimilarity(a.infos, c.infos));
-      const why = {
-        missing: 'These PDFs carry no slide IDs (they were made before the IDs were added).',
-        'one-side': 'Only one of the two files carries slide IDs, so they come from different exports of the slides (the slides may have changed in between).',
-        partial: 'Only some pages carry slide IDs.',
-        'different-export': 'The two files come from different exports of the slides, so their slide IDs do not match.',
-        'not-subset': 'The slide IDs of the two files do not line up.',
+      match = KPM.alignBySimilarity(a.infos, c.infos);
+      mapping = match.mapping;
+      const changed = match.exact.filter((e) => !e).length;
+      const check = changed === 0 ? 'Every page has an exact counterpart.'
+        : `${changed} page${changed === 1 ? ' differs' : 's differ'} between the two files and ${changed === 1 ? 'is' : 'are'} marked “?”: check that each pair shows the same slide.`;
+      // Separate exports of the same lecture are the normal case (the
+      // (complete) is often exported after the slides were edited), so say
+      // so calmly; only a likely wrong file or broken IDs get a warning.
+      const notes = {
+        missing: ['These files were made before slide IDs were added, so pages were paired by their content.', null],
+        'one-side': ['The two files come from different exports of the slides, so pages were paired by their content.', null],
+        'different-export': ['The two files come from different exports of the same slides, so pages were paired by their content.', null],
+        'different-deck': ['These two files seem to come from different Keynote decks. Check that you picked the (ahead) and (complete) of the same lecture. Pages were paired by their content.', 'warn'],
+        partial: ['Only some pages carry slide IDs, so pages were paired by their content.', 'warn'],
+        'not-subset': ['The slide IDs of the two files do not line up, so pages were paired by their content.', 'warn'],
       }[byStamp.reason];
-      message(`${why} Pages were matched by their content instead. Check the pairs marked “?”.`, 'warn');
+      message(`${notes[0]} ${check}`, notes[1]);
     }
+    state.matchedByStamp = !!byStamp.mapping;
     state.pages = { ahead: a, complete: c };
-    state.rows = KPM.buildRows(a.infos, c.infos, mapping, scores);
+    state.rows = KPM.buildRows(a.infos, c.infos, mapping, match);
     state.expanded = new Set();
     const annotated = state.rows.filter((r) => r.aheadAnnotated).length;
     if (!annotated) {
@@ -264,7 +274,10 @@
 
   // ---------- board ----------
   function label(role, info) {
-    return info.stamp ? `Slide ${info.stamp.slide}` : `${role === 'ahead' ? 'Ahead' : 'Complete'} p. ${info.index + 1}`;
+    // An (ahead) slide number from another export may not be the same
+    // slide's number in (complete); show its page number instead then.
+    const trusted = role === 'complete' || state.matchedByStamp;
+    return info.stamp && trusted ? `Slide ${info.stamp.slide}` : `${role === 'ahead' ? 'Ahead' : 'Complete'} p. ${info.index + 1}`;
   }
 
   function thumbCell(role, idx, row) {
@@ -342,7 +355,7 @@
       btn.setAttribute('aria-pressed', String(row.useAhead));
       btn.title = (row.useAhead ? 'Using your (ahead) page. Click to keep the (complete) page.'
         : 'Keeping the (complete) page. Click to use your (ahead) page instead.')
-        + (row.uncertain ? ' These two pages were matched by content: check that they are the same slide.' : '');
+        + (row.uncertain ? ' These two pages differ (the slide may have been edited between the two exports): check that they show the same slide.' : '');
     }
     completeCell.classList.toggle('replaced', row.useAhead);
     if (repLabel) repLabel.hidden = !row.useAhead;

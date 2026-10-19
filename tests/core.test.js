@@ -30,7 +30,9 @@ const AHEAD_SLIDES = [1, 2, 4, 7, 9, 10];
 const EXPECTED_MAPPING = AHEAD_SLIDES.map((s) => COMPLETE_SLIDES.indexOf(s));
 
 test('parseStamp', () => {
-  assert.deepEqual(KPM.parseStamp('foo KPB1|3fa9c01b2e7d|17|42 bar'), { deck: '3fa9c01b2e7d', slide: 17, total: 42 });
+  assert.deepEqual(KPM.parseStamp('foo KPB2|9c1e0a7b3d42|3fa9c01b2e7d|17|42 bar'),
+    { deck: '9c1e0a7b3d42', run: '3fa9c01b2e7d', slide: 17, total: 42 });
+  assert.deepEqual(KPM.parseStamp('foo KPB1|3fa9c01b2e7d|17|42 bar'), { deck: null, run: '3fa9c01b2e7d', slide: 17, total: 42 });
   assert.equal(KPM.parseStamp('KPB1|XYZ|1|2'), null);
   assert.equal(KPM.parseStamp(''), null);
 });
@@ -43,7 +45,7 @@ test('reads stamps and student annotations; ignores links', async () => {
   assert.equal(a[0].annotCount, 0);
   assert.deepEqual(a.map((p) => p.annotCount > 0), [false, false, true, false, true, true]);
   assert.deepEqual(a[4].annotTypes.sort(), ['Highlight', 'Text']);
-  assert.ok(!a[0].words.includes('kpb1'), 'stamp is not part of the words');
+  assert.ok(!a[0].words.some((w) => w.startsWith('kpb')), 'stamp is not part of the words');
 });
 
 test('alignByStamps maps by slide number', async () => {
@@ -59,15 +61,51 @@ test('alignByStamps refuses missing or mismatched stamps', async () => {
   const u = await infos('stamped');
   assert.equal(KPM.alignByStamps(a, u.c).reason, 'one-side');
   assert.equal(KPM.alignByStamps([...a.slice(0, 1), ...u.a.slice(1)], u.c).reason, 'partial');
-  ({ a, c } = await infos('mismatched-deck'));
+  ({ a, c } = await infos('other-run'));
   assert.equal(KPM.alignByStamps(a, c).reason, 'different-export');
+  ({ a, c } = await infos('other-deck'));
+  assert.equal(KPM.alignByStamps(a, c).reason, 'different-deck');
+  // KPB1 stamps carry no deck: a run mismatch can only be a different export.
+  const kpb1 = (p) => ({ ...p, stamp: { ...p.stamp, deck: null } });
+  assert.equal(KPM.alignByStamps(a.map(kpb1), c.map(kpb1)).reason, 'different-export');
 });
 
-test('alignBySimilarity recovers the mapping from text alone', async () => {
+test('textKey ignores bare numbers (shifting slide numbers)', () => {
+  assert.equal(KPM.textKey(['build', 'step', 'first', 'bullet', '9']), KPM.textKey(['build', 'step', 'first', 'bullet', '10']));
+  assert.notEqual(KPM.textKey(['x', '42']), KPM.textKey(['y', '42']));
+});
+
+// other-run: the (complete) export came from an edited deck. Complete pages:
+// welcome, agenda, NEW, defs (reworded), ex1, ex2, shapes, build1, build2;
+// slide numbers after "agenda" are all one higher than in (ahead).
+test('alignBySimilarity across runs: exact anchors, only edited pages flagged', async () => {
+  const { a, c } = await infos('other-run');
+  // The text-less "shapes" slide can only be told apart by its picture;
+  // the page supplies thumbnails, Node does not, so stand one in.
+  a[3].thumbVec = c[6].thumbVec = new Array(16).fill(50);
+  const match = KPM.alignBySimilarity(a, c);
+  assert.deepEqual(match.mapping, [0, 1, 3, 6, 7, 8]);
+  // Only "defs" was reworded.
+  assert.deepEqual(match.exact, [true, true, false, true, true, true]);
+  const rows = KPM.buildRows(a, c, match.mapping, match);
+  assert.deepEqual(rows.filter((r) => r.uncertain).map((r) => r.completeIdx), [3]);
+  assert.deepEqual(rows.filter((r) => r.aheadIdx === null).map((r) => r.completeIdx), [2, 4, 5]);
+});
+
+test('samePage compares pictures for text-less pages', () => {
+  const v = (x) => new Array(16).fill(x);
+  assert.equal(KPM.samePage({ words: ['7'], thumbVec: v(100) }, { words: ['8'], thumbVec: v(101) }), true);
+  assert.equal(KPM.samePage({ words: [], thumbVec: v(100) }, { words: [], thumbVec: v(160) }), false);
+  assert.equal(KPM.samePage({ words: ['a'] }, { words: ['b'] }), false);
+});
+
+test('alignBySimilarity recovers the mapping from content', async () => {
   const { a, c } = await infos('unstamped');
-  const { mapping, scores } = KPM.alignBySimilarity(a, c);
+  a[3].thumbVec = c[5].thumbVec = new Array(16).fill(50);  // text-less slide 7: see the other-run test
+  const { mapping, scores, exact } = KPM.alignBySimilarity(a, c);
   assert.deepEqual(mapping, EXPECTED_MAPPING);
   assert.ok(scores.every((s) => s > 0.9), `scores ${scores}`);
+  assert.ok(exact.every(Boolean), `exact ${exact}`);
 });
 
 test('alignBySimilarity uses thumbnails for text-less pages', () => {

@@ -267,20 +267,36 @@ main, .top { max-width: 960px; margin: 0 auto; padding: 0 16px; }
   'use strict';
 
   // Invisible per-page stamp written by keynote-pdf-brancher
-  // (export_keynote.stamp_slide_ids): KPB1|<deck-id>|<slide>|<total>
-  const STAMP_RE = /KPB1\|([0-9a-f]{12})\|(\d+)\|(\d+)/;
+  // (export_keynote.stamp_slide_ids): KPB2|<deck>|<run>|<slide>|<total>.
+  // deck: hash of the .key file name (same across runs); run: random per
+  // export, so slide numbers are only comparable within one run. The
+  // earlier KPB1|<run>|<slide>|<total> carried no deck.
+  const STAMP_RE = /KPB2\|([0-9a-f]{12})\|([0-9a-f]{12})\|(\d+)\|(\d+)|KPB1\|([0-9a-f]{12})\|(\d+)\|(\d+)/;
+  const STAMP_RE_ALL = new RegExp(STAMP_RE.source, 'g');
 
   // Annotation subtypes that are not a student's markup: hyperlinks Keynote
   // exports itself, form fields, and popups (counted through their parent).
   const IGNORED_SUBTYPES = new Set(['Link', 'Widget', 'Popup']);
 
-  // Below this similarity a visually matched pair is flagged as uncertain.
+  // Below this similarity a content-matched pair is flagged as uncertain
+  // (only used when no exact-text information is available).
   const UNCERTAIN_BELOW = 0.5;
+
+  // Weight of a pair of pages with identical text in the alignment: above
+  // any fuzzy score (at most 1), so exact matches anchor the alignment.
+  const ANCHOR_BONUS = 2;
+
+  // A bare number, such as the slide number a theme bakes in.
+  const NUMBER = /^\d+$/;
+
+  // Text-less pages count as an exact match from this thumbnail similarity up.
+  const SAME_PICTURE = 0.97;
 
   function parseStamp(text) {
     const m = STAMP_RE.exec(text || '');
     if (!m) return null;
-    return { deck: m[1], slide: Number(m[2]), total: Number(m[3]) };
+    if (m[1]) return { deck: m[1], run: m[2], slide: Number(m[3]), total: Number(m[4]) };
+    return { deck: null, run: m[5], slide: Number(m[6]), total: Number(m[7]) };
   }
 
   function isStudentAnnotation(annot) {
@@ -289,7 +305,7 @@ main, .top { max-width: 960px; margin: 0 auto; padding: 0 16px; }
 
   function tokenize(text) {
     return (text || '')
-      .replace(STAMP_RE, ' ')
+      .replace(STAMP_RE_ALL, ' ')
       .toLowerCase()
       .split(/[^\p{L}\p{N}]+/u)
       .filter(Boolean);
@@ -326,6 +342,15 @@ main, .top { max-width: 960px; margin: 0 auto; padding: 0 16px; }
    * {mapping: null, reason} when stamps are missing, from different exports,
    * or inconsistent; the caller then falls back to similarity matching.
    */
+  /*
+   * The slide's words with bare numbers left out, so the slide number the
+   * theme bakes in (which shifts when slides are added or removed between
+   * exports) does not stop two otherwise identical slides from matching.
+   */
+  function textKey(words) {
+    return words.filter((w) => !NUMBER.test(w)).join(' ');
+  }
+
   function alignByStamps(ahead, complete) {
     const all = ahead.concat(complete);
     if (all.some((p) => !p.stamp)) {
@@ -339,8 +364,15 @@ main, .top { max-width: 960px; margin: 0 auto; padding: 0 16px; }
       }
       return { mapping: null, reason: 'partial' };
     }
-    const decks = new Set(all.map((p) => p.stamp.deck));
-    if (decks.size > 1) return { mapping: null, reason: 'different-export' };
+    const runs = new Set(all.map((p) => p.stamp.run));
+    if (runs.size > 1) {
+      const decksOf = (side) => new Set(side.map((p) => p.stamp.deck));
+      const da = decksOf(ahead);
+      const dc = decksOf(complete);
+      const known = da.size === 1 && dc.size === 1 && !da.has(null) && !dc.has(null);
+      if (known && [...da][0] !== [...dc][0]) return { mapping: null, reason: 'different-deck' };
+      return { mapping: null, reason: 'different-export' };
+    }
     const bySlide = new Map(complete.map((p) => [p.stamp.slide, p.index]));
     const mapping = ahead.map((p) => bySlide.get(p.stamp.slide));
     if (mapping.some((j) => j === undefined)) return { mapping: null, reason: 'not-subset' };
@@ -370,7 +402,9 @@ main, .top { max-width: 960px; margin: 0 auto; padding: 0 16px; }
   }
 
   function pageSimilarity(a, b) {
-    const t = textSimilarity(a.words, b.words);
+    // Bare numbers are left out, like in textKey(): the baked-in slide
+    // number shifts between exports of an edited deck.
+    const t = textSimilarity(a.words.filter((w) => !NUMBER.test(w)), b.words.filter((w) => !NUMBER.test(w)));
     const v = imageSimilarity(a.thumbVec, b.thumbVec);
     if (t === null && v === null) return 0;
     if (t === null) return v;
@@ -380,23 +414,36 @@ main, .top { max-width: 960px; margin: 0 auto; padding: 0 16px; }
     return 0.75 * t + 0.25 * v;
   }
 
+  /* Same slide content: identical text, or for text-less slides the same picture. */
+  function samePage(a, b) {
+    const ka = textKey(a.words);
+    const kb = textKey(b.words);
+    if (ka || kb) return ka === kb;
+    const v = imageSimilarity(a.thumbVec, b.thumbVec);
+    return v !== null && v >= SAME_PICTURE;
+  }
+
   /*
    * Order-preserving alignment of every ahead page onto a distinct complete
-   * page, maximising total similarity ((ahead) is an in-order subset of
-   * (complete)). Returns {mapping, scores}.
+   * page ((ahead) is an in-order subset of (complete)). Pages with the same
+   * content anchor it; the rest are placed by similarity. Returns
+   * {mapping, scores, exact}: exact[i] is false where the paired pages
+   * differ, i.e. the slide was edited between exports, or the match is a guess.
    */
   function alignBySimilarity(ahead, complete) {
     const n = ahead.length;
     const m = complete.length;
     if (n > m) throw new Error('ahead-longer');
     const sim = ahead.map((a) => complete.map((c) => pageSimilarity(a, c)));
+    const same = ahead.map((a) => complete.map((c) => samePage(a, c)));
+    const weight = (i, j) => sim[i][j] + (same[i][j] ? ANCHOR_BONUS : 0);
     const NEG = -Infinity;
     // dp[i][j]: best score placing the first i ahead pages within the first j complete pages.
     const dp = Array.from({ length: n + 1 }, () => new Float64Array(m + 1).fill(NEG));
     for (let j = 0; j <= m; j++) dp[0][j] = 0;
     for (let i = 1; i <= n; i++) {
       for (let j = i; j <= m; j++) {
-        dp[i][j] = Math.max(dp[i][j - 1], dp[i - 1][j - 1] + sim[i - 1][j - 1]);
+        dp[i][j] = Math.max(dp[i][j - 1], dp[i - 1][j - 1] + weight(i - 1, j - 1));
       }
     }
     const mapping = new Array(n);
@@ -406,25 +453,33 @@ main, .top { max-width: 960px; margin: 0 auto; padding: 0 16px; }
       mapping[i - 1] = j - 1;
       j--;
     }
-    return { mapping, scores: mapping.map((cj, i) => sim[i][cj]) };
+    return {
+      mapping,
+      scores: mapping.map((cj, i) => sim[i][cj]),
+      exact: mapping.map((cj, i) => same[i][cj]),
+    };
   }
 
   /*
    * One row per (complete) page, in order. ahead: page index or null.
-   * uncertain: the pair was matched visually with a low score.
+   * match: null (mapped by stamp) or alignBySimilarity's {scores, exact}.
+   * uncertain: a content-matched pair whose pages differ.
    */
-  function buildRows(ahead, complete, mapping, scores) {
+  function buildRows(ahead, complete, mapping, match) {
     const aheadFor = new Map(mapping.map((cj, ai) => [cj, ai]));
     return complete.map((c, cj) => {
       const ai = aheadFor.has(cj) ? aheadFor.get(cj) : null;
       const a = ai === null ? null : ahead[ai];
-      const score = scores && ai !== null ? scores[ai] : null;
+      let uncertain = false;
+      if (match && ai !== null) {
+        uncertain = match.exact ? !match.exact[ai] : match.scores[ai] < UNCERTAIN_BELOW;
+      }
       return {
         completeIdx: cj,
         aheadIdx: ai,
         aheadAnnotated: !!(a && a.annotCount),
         completeAnnotated: c.annotCount > 0,
-        uncertain: score !== null && score < UNCERTAIN_BELOW,
+        uncertain,
         slide: c.stamp ? c.stamp.slide : null,
         useAhead: !!(a && a.annotCount),
       };
@@ -503,6 +558,8 @@ main, .top { max-width: 960px; margin: 0 auto; padding: 0 16px; }
   return {
     STAMP_RE,
     UNCERTAIN_BELOW,
+    textKey,
+    samePage,
     parseStamp,
     isStudentAnnotation,
     tokenize,
@@ -546,6 +603,7 @@ main, .top { max-width: 960px; margin: 0 auto; padding: 0 16px; }
     pages: null,     // {ahead: {infos, canvases, bytes}, complete: {...}}
     expanded: new Set(),
     pdfWorker: null,
+    matchedByStamp: false,
   };
 
   // ---------- pdf.js worker ----------
@@ -754,7 +812,7 @@ main, .top { max-width: 960px; margin: 0 auto; padding: 0 16px; }
 
   function align(a, c) {
     let mapping;
-    let scores = null;
+    let match = null;
     const byStamp = KPM.alignByStamps(a.infos, c.infos);
     if (byStamp.mapping) {
       mapping = byStamp.mapping;
@@ -763,18 +821,27 @@ main, .top { max-width: 960px; margin: 0 auto; padding: 0 16px; }
         message('Your (ahead) file has more pages than the (complete) file. Did you put them the wrong way round? Use ⇄ to swap them.', 'error');
         return;
       }
-      ({ mapping, scores } = KPM.alignBySimilarity(a.infos, c.infos));
-      const why = {
-        missing: 'These PDFs carry no slide IDs (they were made before the IDs were added).',
-        'one-side': 'Only one of the two files carries slide IDs, so they come from different exports of the slides (the slides may have changed in between).',
-        partial: 'Only some pages carry slide IDs.',
-        'different-export': 'The two files come from different exports of the slides, so their slide IDs do not match.',
-        'not-subset': 'The slide IDs of the two files do not line up.',
+      match = KPM.alignBySimilarity(a.infos, c.infos);
+      mapping = match.mapping;
+      const changed = match.exact.filter((e) => !e).length;
+      const check = changed === 0 ? 'Every page has an exact counterpart.'
+        : `${changed} page${changed === 1 ? ' differs' : 's differ'} between the two files and ${changed === 1 ? 'is' : 'are'} marked “?”: check that each pair shows the same slide.`;
+      // Separate exports of the same lecture are the normal case (the
+      // (complete) is often exported after the slides were edited), so say
+      // so calmly; only a likely wrong file or broken IDs get a warning.
+      const notes = {
+        missing: ['These files were made before slide IDs were added, so pages were paired by their content.', null],
+        'one-side': ['The two files come from different exports of the slides, so pages were paired by their content.', null],
+        'different-export': ['The two files come from different exports of the same slides, so pages were paired by their content.', null],
+        'different-deck': ['These two files seem to come from different Keynote decks. Check that you picked the (ahead) and (complete) of the same lecture. Pages were paired by their content.', 'warn'],
+        partial: ['Only some pages carry slide IDs, so pages were paired by their content.', 'warn'],
+        'not-subset': ['The slide IDs of the two files do not line up, so pages were paired by their content.', 'warn'],
       }[byStamp.reason];
-      message(`${why} Pages were matched by their content instead. Check the pairs marked “?”.`, 'warn');
+      message(`${notes[0]} ${check}`, notes[1]);
     }
+    state.matchedByStamp = !!byStamp.mapping;
     state.pages = { ahead: a, complete: c };
-    state.rows = KPM.buildRows(a.infos, c.infos, mapping, scores);
+    state.rows = KPM.buildRows(a.infos, c.infos, mapping, match);
     state.expanded = new Set();
     const annotated = state.rows.filter((r) => r.aheadAnnotated).length;
     if (!annotated) {
@@ -789,7 +856,10 @@ main, .top { max-width: 960px; margin: 0 auto; padding: 0 16px; }
 
   // ---------- board ----------
   function label(role, info) {
-    return info.stamp ? `Slide ${info.stamp.slide}` : `${role === 'ahead' ? 'Ahead' : 'Complete'} p. ${info.index + 1}`;
+    // An (ahead) slide number from another export may not be the same
+    // slide's number in (complete); show its page number instead then.
+    const trusted = role === 'complete' || state.matchedByStamp;
+    return info.stamp && trusted ? `Slide ${info.stamp.slide}` : `${role === 'ahead' ? 'Ahead' : 'Complete'} p. ${info.index + 1}`;
   }
 
   function thumbCell(role, idx, row) {
@@ -867,7 +937,7 @@ main, .top { max-width: 960px; margin: 0 auto; padding: 0 16px; }
       btn.setAttribute('aria-pressed', String(row.useAhead));
       btn.title = (row.useAhead ? 'Using your (ahead) page. Click to keep the (complete) page.'
         : 'Keeping the (complete) page. Click to use your (ahead) page instead.')
-        + (row.uncertain ? ' These two pages were matched by content: check that they are the same slide.' : '');
+        + (row.uncertain ? ' These two pages differ (the slide may have been edited between the two exports): check that they show the same slide.' : '');
     }
     completeCell.classList.toggle('replaced', row.useAhead);
     if (repLabel) repLabel.hidden = !row.useAhead;
